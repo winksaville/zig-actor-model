@@ -84,6 +84,7 @@ fn threadDispatcher(pContext: *ThreadContext) void {
         {
             gCounter_mutex.lock();
             defer gCounter_mutex.unlock();
+
             gCounter += 1;
         }
         pContext.counter += 1;
@@ -96,32 +97,24 @@ test "Mutex" {
 
     var mutex: Mutex = undefined;
     mutex.init();
-    warn("test Mutex: mutex={*} mutex.value={}\n", &mutex, mutex.value);
+    assert(mutex.value == 0);
 
     mutex.lock();
-    warn("test Mutex: after lock mutex={*} mutex.value={}\n", &mutex, mutex.value);
+    assert(mutex.value == 1);
     mutex.unlock();
-    warn("test Mutex: after unlock mutex={*} mutex.value={}\n", &mutex, mutex.value);
+    assert(mutex.value == 0);
 
-    // Initialize gCoutner and it's mutex
+    // Initialize gCounter and it's mutex
     gCounter = 0;
     gCounter_mutex.init();
 
-    warn("call threadSpawn\n");
     gThread0_context.init("thread0");
-    warn("gThread0_context.name len={} name={}\n", gThread0_context.name.len,
-            gThread0_context.name[0..gThread0_context.name_len]);
-    var thread0 = try std.os.spawnThread(&gThread0_context, threadDispatcher);
-
     gThread1_context.init("thread1");
-    warn("gThread1_context.name len={} name={}\n", gThread1_context.name.len,
-            gThread1_context.name[0..gThread1_context.name_len]);
+    var thread0 = try std.os.spawnThread(&gThread0_context, threadDispatcher);
     var thread1 = try std.os.spawnThread(&gThread1_context, threadDispatcher);
 
     warn("call thread0/1.wait\n");
     thread0.wait();
-    //warn("call after thread0.wait\n");
-    //warn("call thread1.wait\n");
     thread1.wait();
     warn("call after thread0/1.wait\n");
 
