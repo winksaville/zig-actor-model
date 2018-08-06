@@ -13,13 +13,6 @@ const linux = switch(builtin.os) {
     else => @compileError("Only builtin.os.linux is supported"),
 };
 
-//pub const posix = switch (builtin.os) {
-//    builtin.Os.linux => linux,
-//    builtin.Os.macosx, builtin.Os.ios => darwin,
-//    builtin.Os.zen => zen,
-//    else => @compileError("Unsupported OS"),
-//};
-
 pub use switch(builtin.arch) {
     builtin.Arch.x86_64 => @import("../zig/std/os/linux/x86_64.zig"),
     else => @compileError("unsupported arch"),
@@ -35,27 +28,42 @@ pub fn futex_wake(pVal: *usize, num_threads_to_wake: u32) void {
     _ = syscall4(SYS_futex, @ptrToInt(pVal), linux.FUTEX_WAKE, num_threads_to_wake, 0);
 }
 
-pub const Mutex = struct {
-    const Self = this;
-
-    value: usize,
-
-    pub fn init(pSelf: *Self) void {
-        warn("Mutex.init: pSelf={*}\n", pSelf);
-        pSelf.value = 0;
-    }
-
-    pub fn lock(pSelf: *Self) void {
-        while (@atomicRmw(usize, &pSelf.value, AtomicRmwOp.Xchg, 1, AtomicOrder.SeqCst) != 0) {
-            futex_wait(&pSelf.value, 1);
-        }
-    }
-
-    pub fn unlock(pSelf: *Self) void {
-        assert(@atomicRmw(usize, &pSelf.value, AtomicRmwOp.Xchg, 0, AtomicOrder.SeqCst) == 1);
-        futex_wake(&pSelf.value, 1);
-    }
+pub const Style = enum {
+    Simple,
+    Robust,
 };
+
+pub fn Mutex(comptime mutexType: Style) type {
+    return struct {
+        const Self = this;
+
+        const simple = switch(mutexType) {
+            Style.Simple => Style.Simple,
+            else => @compileError("Only Style.Simple supported"),
+        };
+
+        value: usize,
+        simpleStyle: Style, // TODO: Don't require a field to get comptime failure
+
+        pub fn init() Self {
+            return Self {
+                .value = 0,
+                .simpleStyle = simple,
+            };
+        }
+
+        pub fn lock(pSelf: *Self) void {
+            while (@atomicRmw(usize, &pSelf.value, AtomicRmwOp.Xchg, 1, AtomicOrder.SeqCst) != 0) {
+                futex_wait(&pSelf.value, 1);
+            }
+        }
+
+        pub fn unlock(pSelf: *Self) void {
+            assert(@atomicRmw(usize, &pSelf.value, AtomicRmwOp.Xchg, 0, AtomicOrder.SeqCst) == 1);
+            futex_wake(&pSelf.value, 1);
+        }
+    };
+}
 
 const ThreadContext = struct {
     const Self = this;
@@ -76,7 +84,8 @@ const ThreadContext = struct {
 var gThread0_context: ThreadContext = undefined;
 var gThread1_context: ThreadContext = undefined;
 
-var gCounter_mutex: Mutex = undefined;
+var gCounter_mutex = Mutex(Style.Simple).init();
+//var gCounter_mutex = Mutex(Style.Robust).init(); Generates a compile time error
 var gCounter: u128 = undefined;
 
 fn threadDispatcher(pContext: *ThreadContext) void {
@@ -95,8 +104,7 @@ test "Mutex" {
     warn("\ntest Mutex:+ gCounter={}\n", gCounter);
     defer warn("test Mutex:- gCounter={}\n", gCounter);
 
-    var mutex: Mutex = undefined;
-    mutex.init();
+    var mutex = Mutex(Style.Simple).init();
     assert(mutex.value == 0);
 
     mutex.lock();
@@ -106,7 +114,7 @@ test "Mutex" {
 
     // Initialize gCounter and it's mutex
     gCounter = 0;
-    gCounter_mutex.init();
+    //Mtx.init(gCounter_mutex);
 
     gThread0_context.init("thread0");
     gThread1_context.init("thread1");
