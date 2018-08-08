@@ -114,20 +114,19 @@ test "Actor" {
     assert(myActor.body.count == 2 * 123);
 
     const MyActorDispatcher = ActorDispatcher(5);
-    var myActorDispatcher = MyActorDispatcher.init();
+    var myActorDispatcher: MyActorDispatcher = undefined;
+    myActorDispatcher.init();
     assert(myActorDispatcher.actors_count == 0);
     try myActorDispatcher.add(&myActor.interface);
     assert(myActorDispatcher.actors_count == 1);
     assert(myActorDispatcher.actors[0].processMessage == myActor.interface.processMessage);
 
-    // Create a node with a pointer to a message
-    var node0 = @typeOf(myActorDispatcher.queue).Node {
-        .data = &myMsg.header,
-        .next = undefined,
-    };
+    const Msg0 = Message(packed struct {});
+    var msg0: Msg0 = undefined;
+    msg0.header.init(123);
 
     // Place the node on the queue and broadcast to the actors
-    myActorDispatcher.queue.put(&node0);
+    myActorDispatcher.queue.put(&msg0.header);
     myActorDispatcher.broadcastLoop();
     assert(myActorDispatcher.last_msg_cmd == 123);
     assert(myActorDispatcher.msg_count == 1);
