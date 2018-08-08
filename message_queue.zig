@@ -10,30 +10,18 @@ const builtin = @import("builtin");
 const AtomicOrder = builtin.AtomicOrder;
 const AtomicRmwOp = builtin.AtomicRmwOp;
 
-const linux = switch(builtin.os) {
-    builtin.Os.linux => std.os.linux,
-    else => @compileError("Only builtin.os.linux is supported"),
+/// SignalContext is Os specific
+pub const SignalContext = switch (builtin.os) {
+    builtin.Os.linux => u32,
+    else => @compileError("Unsupported OS"),
 };
 
-//pub const posix = switch (builtin.os) {
-//    builtin.Os.linux => linux,
-//    builtin.Os.macosx, builtin.Os.ios => darwin,
-//    builtin.Os.zen => zen,
-//    else => @compileError("Unsupported OS"),
-//};
-
-pub use switch(builtin.arch) {
-    builtin.Arch.x86_64 => @import("../zig/std/os/linux/x86_64.zig"),
-    else => @compileError("unsupported arch"),
-};
-
-const SignalContext = u32;
 
 /// A Many producer, single consumer queue of MessageHeaders.
 /// Based on std.atomic.Queue
 ///
 /// Uses a spinlock to protect get() and put() and thus is non-blocking
-pub fn ActorMessageQueue() type {
+pub fn MessageQueue() type {
     return struct {
         pub const Self = this;
 
@@ -43,7 +31,7 @@ pub fn ActorMessageQueue() type {
         signalFn: ?fn(pSignalContext: *SignalContext) void,
         pSignalContext: ?*SignalContext,
 
-        /// Initialize an ActorMessageQueue with optional signalFn and signalContext.
+        /// Initialize an MessageQueue with optional signalFn and signalContext.
         /// When the first message is added to an empty signalFn is invoked if it
         /// and a signalContext is available. If either are null then the signalFn
         /// will never be invoked.
@@ -98,34 +86,12 @@ pub fn ActorMessageQueue() type {
             //warn("get: return head={*} cmd={}\n", head, head.cmd);
             return head;
         }
-
-        pub fn dump(pSelf: *Self) void {
-            while (@atomicRmw(u8, &pSelf.lock, builtin.AtomicRmwOp.Xchg, 1, AtomicOrder.SeqCst) != 0) {}
-            defer assert(@atomicRmw(u8, &pSelf.lock, builtin.AtomicRmwOp.Xchg, 0, AtomicOrder.SeqCst) == 1);
-
-            std.debug.warn("head: ");
-            dumpRecursive(pSelf.head, 0);
-            std.debug.warn("tail: ");
-            dumpRecursive(pSelf.tail, 0);
-        }
-
-        fn dumpRecursive(optional_mh: ?*MessageHeader, indent: usize) void {
-            var stderr_file = std.io.getStdErr() catch return;
-            const stderr = &std.io.FileOutStream.init(&stderr_file).stream;
-            stderr.writeByteNTimes(' ', indent) catch return;
-            if (optional_mh) |mh| {
-                std.debug.warn("{*}:cmd={}\n", mh, mh.cmd);
-                dumpRecursive(mh.next, indent + 1);
-            } else {
-                std.debug.warn("(null)\n");
-            }
-        }
     };
 }
 
 const Context = struct {
     allocator: *std.mem.Allocator,
-    queue: *ActorMessageQueue(),
+    queue: *MessageQueue(),
     put_sum: u64,
     get_sum: u64,
     get_count: usize,
@@ -140,7 +106,7 @@ const Context = struct {
 const puts_per_thread = 500;
 const put_thread_count = 3;
 
-test "ActorMessageQueue.multi-threaded" {
+test "MessageQueue.multi-threaded" {
     var direct_allocator = std.heap.DirectAllocator.init();
     defer direct_allocator.deinit();
 
@@ -150,7 +116,9 @@ test "ActorMessageQueue.multi-threaded" {
     var fixed_buffer_allocator = std.heap.ThreadSafeFixedBufferAllocator.init(plenty_of_memory);
     var a = &fixed_buffer_allocator.allocator;
 
-    var queue = ActorMessageQueue().init(signaler, &signal);
+    signal_count = 0;
+
+    var queue = MessageQueue().init(signaler, &signal);
     var context = Context{
         .allocator = a,
         .queue = &queue,
@@ -231,8 +199,10 @@ fn signaler(pSignalContext: *SignalContext) void {
     futex_wake(pSignalContext, 1);
 }
 
-test "ActorMessageQueue.single-threaded" {
-    var queue = ActorMessageQueue().init(signaler, &signal);
+test "MessageQueue.single-threaded" {
+    var queue = MessageQueue().init(signaler, &signal);
+
+    signal_count = 0;
 
     var mh_0 = MessageHeader {
         .cmd = 0,
