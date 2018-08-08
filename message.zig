@@ -43,6 +43,7 @@ pub fn Message(comptime BodyType: type) type {
 pub const MessageHeader = packed struct {
     const Self = this;
 
+    pub next: ?*MessageHeader,
     pub cmd: u64,
 
     pub fn init(pSelf: *Self, cmd: u64) void {
