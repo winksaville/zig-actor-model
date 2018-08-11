@@ -46,7 +46,7 @@ pub fn MessageQueue() type {
         }
 
         pub fn put(pSelf: *Self, mh: *MessageHeader) void {
-            mh.next = null;
+            mh.pNext = null;
 
             while (@atomicRmw(u8, &pSelf.lock, builtin.AtomicRmwOp.Xchg, 1, AtomicOrder.SeqCst) != 0) {}
             defer assert(@atomicRmw(u8, &pSelf.lock, builtin.AtomicRmwOp.Xchg, 0, AtomicOrder.SeqCst) == 1);
@@ -56,7 +56,7 @@ pub fn MessageQueue() type {
             if (opt_tail) |tail| {
                 // Append
                 //warn("put: append mh={*} cmd={}\n", mh, mh.cmd);
-                tail.next = mh;
+                tail.pNext = mh;
             } else {
                 // Was empty so wakeup any waiters
                 assert(pSelf.head == null);
@@ -78,8 +78,8 @@ pub fn MessageQueue() type {
                 //warn("get: return null\n");
                 return null;
             };
-            pSelf.head = head.next;
-            if (head.next == null) {
+            pSelf.head = head.pNext;
+            if (head.pNext == null) {
                 pSelf.tail = null;
                 //warn("get: returning last entry head={*} cmd={}\n", head, head.cmd);
             }
@@ -162,7 +162,12 @@ fn startPuts(ctx: *Context) u8 {
         std.os.time.sleep(0, 1); // let the os scheduler be our fuzz
         const x = r.random.scalar(u64);
         const mh = ctx.allocator.create(MessageHeader {
-            .next = undefined,
+            .pNext = null,
+            .pAllocator = null,
+            .pSrcQueue = null,
+            .pSrcActor = null,
+            .pDstQueue = null,
+            .pDstActor = null,
             .cmd = x,
         }) catch unreachable;
         ctx.queue.put(mh);
@@ -204,10 +209,8 @@ test "MessageQueue.single-threaded" {
 
     signal_count = 0;
 
-    var mh_0 = MessageHeader {
-        .cmd = 0,
-        .next = undefined,
-    };
+    var mh_0: MessageHeader = undefined;
+    mh_0.initEmpty();
     queue.put(&mh_0);
     assert(signal_count == 1);
     assert(queue.get().?.cmd == 0);
@@ -215,24 +218,26 @@ test "MessageQueue.single-threaded" {
     queue.put(&mh_0);
     assert(signal_count == 2);
 
-    var mh_1 = MessageHeader {
-        .cmd = 1,
-        .next = undefined,
-    };
+    var mh_1: MessageHeader = undefined;
+    mh_1.initEmpty();
+    mh_1.cmd = 1;
     queue.put(&mh_1);
     assert(signal_count == 2);
     assert(queue.get().?.cmd == 0);
     assert(signal_count == 2);
 
-    var mh_2 = MessageHeader {
-        .cmd = 2,
-        .next = undefined,
-    };
+    var mh_2: MessageHeader = undefined;
+    mh_2.init(null, null, null, null, null, 2);
     queue.put(&mh_2);
 
     var mh_3 = MessageHeader {
+        .pNext = null,
+        .pAllocator = null,
+        .pSrcQueue = null,
+        .pSrcActor = null,
+        .pDstQueue = null,
+        .pDstActor = null,
         .cmd = 3,
-        .next = undefined,
     };
     queue.put(&mh_3);
 
@@ -240,14 +245,12 @@ test "MessageQueue.single-threaded" {
 
     assert(queue.get().?.cmd == 2);
 
-    var mh_4 = MessageHeader {
-        .cmd = 4,
-        .next = undefined,
-    };
+    var mh_4: MessageHeader = undefined;
+    mh_4.initEmpty();
+    mh_4.cmd = 4;
     queue.put(&mh_4);
 
     assert(queue.get().?.cmd == 3);
-    mh_3.next = null;
 
     assert(queue.get().?.cmd == 4);
 

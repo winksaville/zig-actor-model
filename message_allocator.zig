@@ -36,9 +36,7 @@ const DirectAllocator = std.heap.DirectAllocator;
 ///
 ///       2) Using an array rather than a link list would probably
 ///       improve performance.
-pub fn MessageAllocator(comptime msg_count: usize, comptime max_msg_body_size: usize) type {
-
-    if (msg_count == 0) @compileError("MessageAllocator: msg_count must be > 0\n");
+pub fn MessageAllocator() type {
 
     return struct {
         pub const Self = this;
@@ -50,27 +48,31 @@ pub fn MessageAllocator(comptime msg_count: usize, comptime max_msg_body_size: u
 
         // Make sure message size is a multiple alignment
         const alignment: u29 = 64;
-        const max_msg_size: usize =
-                ((@sizeOf(MessageHeader) + max_msg_body_size + alignment - 1) / alignment) * alignment;
+        msg_count: usize,
+        max_msg_size: usize,
         buffer: [] align(alignment) u8,
 
-        /// Initialize an MessageQueue with optional signalFn and signalContext.
-        /// When the first message is added to an empty signalFn is invoked if it
-        /// and a signalContext is available. If either are null then the signalFn
-        /// will never be invoked.
-        pub fn init(pSelf: *Self) !void {
+        pub fn init(pSelf: *Self, msg_count: usize, max_msg_body_size: usize) !void {
+            if (msg_count == 0) return error.MsgCountMustBeGreaterThanZero;
+
             pSelf.direct_allocator = DirectAllocator.init();
             pSelf.allocator = pSelf.direct_allocator.allocator;
             pSelf.signalContext = 0;
             pSelf.queue = MessageQueue().init(signalFn, &pSelf.signalContext);
 
             // Allocate the buffer
-            pSelf.buffer = try pSelf.allocator.alignedAlloc(u8, alignment, msg_count * max_msg_size);
+            pSelf.msg_count = msg_count;
+            pSelf.max_msg_size =
+                ((@sizeOf(MessageHeader) + max_msg_body_size + alignment - 1) / alignment) * alignment;
+            pSelf.buffer = try pSelf.allocator.alignedAlloc(u8, alignment, msg_count * pSelf.max_msg_size);
 
             // Carve up the buffer placing the messages on the queue
             var i: usize = 0;
             while (i < msg_count) {
-                pSelf.put(@ptrCast(*MessageHeader, &pSelf.buffer[i * max_msg_size]));
+                assert(@offsetOf(Message(packed struct {}), "header") == 0);
+                var pMh = @ptrCast(*MessageHeader, &pSelf.buffer[i * pSelf.max_msg_size]);
+                pMh.initEmpty();
+                pSelf.put(pMh);
                 i += 1;
             }
             //warn("MessageAllocator.init: pSelf={*}\n", pSelf);
@@ -84,28 +86,32 @@ pub fn MessageAllocator(comptime msg_count: usize, comptime max_msg_body_size: u
             pSelf.direct_allocator.deinit();
         }
 
+        /// Put the message back, ignoring null pointers
         pub fn put(pSelf: *Self, pMessageHeader: ?*MessageHeader) void {
             if (pMessageHeader) |pMh| {
                 pSelf.queue.put(pMh);
             }
         }
 
+        /// Get a message initializing only MessageType.allocator
         pub fn get(pSelf: *Self, comptime MessageType: type) ?*MessageType {
-            if (@sizeOf(MessageType) > max_msg_size) @compileError("Message is to large\n");
-            var mh: *MessageHeader = pSelf.queue.get() orelse return null;
-            return MessageType.getMessagePtr(mh);
+            //warn("MessageAllocator.get: sizeOf(MessageType)={} max_msg_size={}\n",
+            //            usize(@sizeOf(MessageType)), pSelf.max_msg_size);
+            if (@sizeOf(MessageType) > pSelf.max_msg_size) return null;
+            var pMh: *MessageHeader = pSelf.queue.get() orelse return null;
+            pMh.pAllocator = pSelf;
+            return MessageType.getMessagePtr(pMh);
         }
 
         // Maybe we want this signal to go to the entity (Actor) that owns
         // this allocator so they do what need to do directly.
-        //
-        // This also could be a fatal error or simply a Although replies
         fn signalFn(pSignalContext: *SignalContext) void {
-            warn("MessageAllocator.signalFn: {*}\n", pSignalContext);
+            //warn("MessageAllocator.signalFn: {*}\n", pSignalContext);
             //futex_wake(pSignalContext, 1);
         }
     };
 }
+
 
 test "MessageAllocator.1" {
     var direct_allocator = DirectAllocator.init();
@@ -118,15 +124,21 @@ test "MessageAllocator.1" {
     pU32.* = 123;
     assert(pU32.* == 123);
 
-    const MyMa = MessageAllocator(10, 2048);
-
     // Create MyMa on the stack
-    var myMa1: MyMa = undefined;
-    try myMa1.init();
+    var myMa1: MessageAllocator() = undefined;
+    try myMa1.init(2, 2048);
     defer myMa1.deinit();
 
     // Create a Msg type and an array of messages
-    const Msg = Message(packed struct { buffer: [2048]u8, });
+    const Msg = Message(packed struct {
+        const Self = this;
+
+        buffer: [2048]u8,
+
+        pub fn init(pSelf: *Self) void {
+            mem.set(u8, pSelf.buffer[0..], 123);
+        }
+    });
     var msgs: [2] *Msg = undefined;
 
     // Get first 2 messages and be sure there is no overlap.
@@ -137,14 +149,25 @@ test "MessageAllocator.1" {
     msgs[0] = myMa1.get(Msg) orelse return error.badmsgs0;
     msgs[1] = myMa1.get(Msg) orelse return error.badmsgs1;
     assert(@ptrToInt(&msgs[0].body.buffer[2047]) < @ptrToInt(&msgs[1]));
+    assert(myMa1.get(Msg) == null);
 
-    // Put them back
+    msgs[0].init(1);
+    assert(msgs[0].body.buffer[0] == 123);
+
+    // Put them back via header.allocator
+    if (msgs[0].header.pAllocator) |pA| pA.put(&msgs[0].header) else return error.HeaderAllocatorNotInitialized;
+    if (msgs[1].header.pAllocator) |pA| pA.put(&msgs[1].header) else return error.HeaderAllocatorNotInitialized;
+
+    // Verify we can get them again and this time we'll put them back directly
+    msgs[0] = myMa1.get(Msg) orelse return error.badmsgs0;
+    msgs[1] = myMa1.get(Msg) orelse return error.badmsgs1;
+    assert(myMa1.get(Msg) == null);
     myMa1.put(&msgs[0].header);
     myMa1.put(&msgs[1].header);
 
     // Create MyMa using allocator
-    var myMa2: *MyMa = try allocator.createOne(MyMa);
+    var myMa2 = try allocator.createOne(MessageAllocator());
     defer allocator.destroy(myMa2);
-    try myMa2.init();
+    try myMa2.init(10, 204);
     defer myMa2.deinit();
 }

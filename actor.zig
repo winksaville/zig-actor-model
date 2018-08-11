@@ -18,7 +18,7 @@ pub const ActorInterface = packed struct {
 /// processMessage in the BodyType passed to this Actor
 /// Type Constructor.
 pub fn Actor(comptime BodyType: type) type {
-    return packed struct {
+    return struct {
         const Self = this;
 
         pub interface: ActorInterface,
@@ -74,13 +74,13 @@ const MyMsgBody = packed struct {
     }
 };
 
-const MyActorBody = packed struct {
+const MyActorBody = struct {
     const Self = this;
 
     count: u64,
 
-    fn init(actr: *Actor(MyActorBody)) void {
-        actr.body.count = 0;
+    fn init(actor: *Actor(MyActorBody)) void {
+        actor.body.count = 0;
     }
 
     pub fn processMessage(actorInterface: *ActorInterface, msgHeader: *MessageHeader) void {
@@ -97,7 +97,8 @@ const MyActorBody = packed struct {
 test "Actor" {
     // Create a message
     const MyMsg = Message(MyMsgBody);
-    var myMsg = MyMsg.init(123);
+    var myMsg: MyMsg = undefined;
+    myMsg.init(123);
 
     // Create an Actor
     const MyActor = Actor(MyActorBody);

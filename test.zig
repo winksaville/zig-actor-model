@@ -1,13 +1,16 @@
 // Create a Message that supports arbitrary data
 // and can be passed between entities via a Queue.
 
-const actor = @import("actor.zig");
-const Actor = actor.Actor;
-const ActorInterface = actor.ActorInterface;
+const actorNs = @import("actor.zig");
+const Actor = actorNs.Actor;
+const ActorInterface = actorNs.ActorInterface;
 
-const Msg = @import("message.zig");
-const Message = Msg.Message;
-const MessageHeader = Msg.MessageHeader;
+const msgNs = @import("message.zig");
+const Message = msgNs.Message;
+const MessageHeader = msgNs.MessageHeader;
+
+const MessageAllocator = @import("message_allocator.zig").MessageAllocator;
+
 const ActorDispatcher = @import("actor_dispatcher.zig").ActorDispatcher;
 
 const std = @import("std");
@@ -18,127 +21,130 @@ const mem = std.mem;
 const math = std.math;
 const Queue = std.atomic.Queue;
 
-const MyMsgBody = packed struct {
+const Ball = packed struct {
     const Self = this;
-    data: [3]u8,
+
+    hits: u64,
 
     fn init(pSelf: *Self) void {
-        mem.set(u8, pSelf.data[0..], 'Z');
+        pSelf.hits = 0;
+    }
+};
+
+const PlayerBody = struct {
+    const Self = this;
+
+    allocator: MessageAllocator(),
+    hits: u64,
+    max_hits: u64,
+    last_ball_hits: u64,
+
+    fn init(pPlayer: *Actor(PlayerBody)) void {
+        pPlayer.body.hits = 0;
+        pPlayer.body.max_hits = 0;
+        pPlayer.body.last_ball_hits = 0;
+
+        // Should not fail, error out in safy builds
+        pPlayer.body.allocator.init(10, 0) catch unreachable;
     }
 
-    pub fn format(
-        m: *const MyMsgBody,
-        comptime fmt: []const u8,
-        context: var,
-        comptime FmtError: type,
-        output: fn (@typeOf(context), []const u8) FmtError!void
-    ) FmtError!void {
-        try std.fmt.format(context, FmtError, output, "data={{");
-        for (m.data) |v| {
-            if ((v >= ' ') and (v <= 0x7f)) {
-                try std.fmt.format(context, FmtError, output, "{c}," , v);
-            } else {
-                try std.fmt.format(context, FmtError, output, "{x},", v);
-            }
+    pub fn processMessage(pPlayerInterface: *ActorInterface, pMsgHeader: *MessageHeader) void {
+        var pPlayer = Actor(PlayerBody).getActorPtr(pPlayerInterface);
+        //warn("{*}.processMessage pMsgHeader={*} cmd={}\n", pPlayer, pMsgHeader, pMsgHeader.cmd);
+        switch(pMsgHeader.cmd) {
+            1 => {
+                var pMsg = Message(Ball).getMessagePtr(pMsgHeader);
+                pPlayer.body.hits += 1;
+                pPlayer.body.last_ball_hits = pMsg.body.hits;
+                if (pPlayer.body.hits <= pPlayer.body.max_hits) {
+                    if (pMsgHeader.pDstQueue) |pDstQ| {
+                        if (pPlayer.body.allocator.get(Message(Ball))) |pResponse| {
+                            pResponse.init(1);
+                            pResponse.header.initSwap(pMsgHeader);
+                            pResponse.body.hits = pMsg.body.hits + 1;
+                            pDstQ.put(&pResponse.header);
+                        }
+                    }
+                }
+            },
+            else => {
+                // Ignore unknown commands
+                warn("{*} unknown cmd={}\n", pPlayer, pMsgHeader.cmd);
+            },
         }
-        try std.fmt.format(context, FmtError, output, "}},");
+
+        // TODO: Should process message be responsible for returning message?
+        if (pMsgHeader.pAllocator) |pAllocator| pAllocator.put(pMsgHeader);
     }
 };
 
-const MyActorBody = packed struct {
-    const Self = this;
+//const ThreadContext = struct {
+//    const Self = this;
+//
+//    name_len: usize,
+//    name: [32]u8,
+//
+//    pub fn init(pSelf: *Self, name: [] const u8) void {
+//        // Set name_len and then copy with truncation
+//        pSelf.name_len = math.min(name.len, pSelf.name.len);
+//        mem.copy(u8, pSelf.name[0..pSelf.name_len], name[0..pSelf.name_len]);
+//    }
+//};
+//
+//var thread0_context: ThreadContext = undefined;
+//
+//fn threadDispatcher(context: *ThreadContext) void {
+//    warn("threadDispatcher: {}\n", context.name[0..context.name_len]);
+//}
 
-    count: u64,
+test "test.Actor" {
+    // Create Dispatcher
+    const Dispatcher = ActorDispatcher(2);
+    var dispatcher: Dispatcher = undefined;
+    dispatcher.init();
 
-    fn init(actr: *Actor(MyActorBody)) void {
-        actr.body.count = 0;
-    }
+    // Create a Player type
+    const Player = Actor(PlayerBody);
 
-    pub fn processMessage(actorInterface: *ActorInterface, msgHeader: *MessageHeader) void {
-        var pActor = Actor(MyActorBody).getActorPtr(actorInterface);
-        var pMsg = Message(MyMsgBody).getMessagePtr(msgHeader);
-        assert(pMsg.header.cmd == msgHeader.cmd);
+    // Create player1
+    var player1 = Player.init();
+    player1.body.max_hits = 10;
+    assert(player1.body.hits == 0);
+    try dispatcher.add(&player1.interface);
 
-        pActor.body.count += pMsg.header.cmd;
-        //warn("MyActorBody: &processMessage={x} cmd={} count={}\n",
-        //    @ptrToInt(processMessage), msgHeader.cmd, pActor.body.count);
-    }
-};
+    // Create player2
+    var player2 = Player.init();
+    player2.body.max_hits = 10;
+    assert(player2.body.hits == 0);
+    try dispatcher.add(&player2.interface);
 
-const ThreadContext = struct {
-    const Self = this;
+    // Create a message to get things going
+    var ballMsg: Message(Ball) = undefined;
+    ballMsg.init(1);
 
-    name_len: usize,
-    name: [32]u8,
+    ballMsg.header.pAllocator = null;
+    ballMsg.header.pDstActor = &player1.interface;
+    ballMsg.header.pDstQueue = &dispatcher.queue; // Move to ActorInterface and init in dispatcher.add?
+    ballMsg.header.pSrcActor = &player2.interface;
+    ballMsg.header.pSrcQueue = &dispatcher.queue;
 
-    pub fn init(pSelf: *Self, name: [] const u8) void {
-        // Set name_len and then copy with truncation
-        pSelf.name_len = math.min(name.len, pSelf.name.len);
-        mem.copy(u8, pSelf.name[0..pSelf.name_len], name[0..pSelf.name_len]);
-    }
-};
+    ballMsg.initBody();
 
-var thread0_context: ThreadContext = undefined;
+    assert(ballMsg.header.pDstQueue != null);
+    ballMsg.header.pDstQueue.?.put(&ballMsg.header);
+    dispatcher.loop();
 
-fn threadDispatcher(context: *ThreadContext) void {
-    warn("threadDispatcher: {}\n", context.name[0..context.name_len]);
-}
+    assert(player1.body.hits == 11);
+    assert(player1.body.last_ball_hits == 20);
+    assert(player2.body.hits == 10);
+    assert(player2.body.last_ball_hits == 19);
 
-test "Actor" {
-    // Create a message
-    const MyMsg = Message(MyMsgBody);
-    var myMsg = MyMsg.init(123);
-
-    // Create a queue of MessageHeader pointers
-    const MyQueue = Queue(*MessageHeader);
-    var q = MyQueue.init();
-
-    // Create a node with a pointer to a message header
-    var node_0 = MyQueue.Node {
-        .data = &myMsg.header,
-        .next = undefined,
-    };
-
-    // Add and remove it from the queue and verify
-    q.put(&node_0);
-    var n = q.get() orelse { return error.QGetFailed; };
-    var pMsg = Message(MyMsgBody).getMessagePtr(n.data);
-
-    // Create an Actor
-    const MyActor = Actor(MyActorBody);
-    var myActor = MyActor.init();
-
-    myActor.interface.processMessage(&myActor.interface, n.data);
-    assert(myActor.body.count == 1 * 123);
-    myActor.interface.processMessage(&myActor.interface, n.data);
-    assert(myActor.body.count == 2 * 123);
-
-    const MyActorDispatcher = ActorDispatcher(5);
-    var myActorDispatcher: MyActorDispatcher = undefined;
-    myActorDispatcher.init();
-    assert(myActorDispatcher.actors_count == 0);
-    try myActorDispatcher.add(&myActor.interface);
-    assert(myActorDispatcher.actors_count == 1);
-    assert(myActorDispatcher.actors[0].processMessage == myActor.interface.processMessage);
-
-    const Msg0 = Message(packed struct {});
-    var msg0: Msg0 = undefined;
-    msg0.header.init(123);
-
-    // Place the node on the queue and broadcast to the actors
-    myActorDispatcher.queue.put(&msg0.header);
-    myActorDispatcher.broadcastLoop();
-    assert(myActorDispatcher.last_msg_cmd == 123);
-    assert(myActorDispatcher.msg_count == 1);
-    assert(myActorDispatcher.actor_processMessage_count == 1);
-    assert(myActor.body.count == 3 * 123);
-
-    warn("call threadSpawn\n");
-    thread0_context.init("thread0");
-    warn("thread0_context.name len={} name={}\n", thread0_context.name.len,
-            thread0_context.name[0..thread0_context.name_len]);
-    var thread_0 = try std.os.spawnThread(&thread0_context, threadDispatcher);
-    warn("call wait\n");
-    thread_0.wait();
-    warn("call after wait\n");
+    //warn("call threadSpawn\n");
+    //thread0_context.init("thread0");
+    //warn("thread0_context.name len={} name={}\n", thread0_context.name.len,
+    //        thread0_context.name[0..thread0_context.name_len]);
+    //var thread_0 = try std.os.spawnThread(&thread0_context, threadDispatcher);
+    //warn("call wait\n");
+    //thread_0.wait();
+    //warn("call after wait\n");
 }
