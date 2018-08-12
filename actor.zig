@@ -11,6 +11,11 @@ const warn = std.debug.warn;
 ///
 /// There must also be a BodyType.init(*Actor(BodyType))
 pub const ActorInterface = packed struct {
+    // TODO: Add pQueue here so we don't need
+    // both a ?*MessageQueue and ?*ActorInterface in
+    // MessageHeader.
+    //pQueue: ?*MessageQueue,
+
     pub processMessage: fn (actorInterface: *ActorInterface, msg: *MessageHeader) void,
 };
 
