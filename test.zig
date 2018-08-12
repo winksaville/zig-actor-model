@@ -27,6 +27,7 @@ const Ball = packed struct {
     hits: u64,
 
     fn init(pSelf: *Self) void {
+        //warn("{*}.init()\n", pSelf);
         pSelf.hits = 0;
     }
 };
@@ -133,20 +134,26 @@ test "test.Actor" {
 
     // Create a message to get things going
     var ballMsg: Message(Ball) = undefined;
-    ballMsg.init(0);
+    ballMsg.init(0); // Initializes Message.header.cmd to 0 and calls Ball.init()
+                     // via Ball.init(&Message.body). Does NOT init any other header fields!
 
+    // Initialize header fields
     ballMsg.header.pAllocator = null;
     ballMsg.header.pDstActor = &player1.interface;
-    ballMsg.header.pDstQueue = &dispatcher.queue; // Move to ActorInterface and init in dispatcher.add?
+    ballMsg.header.pDstQueue = &dispatcher.queue; // Move to ActorInterface?
     ballMsg.header.pSrcActor = &player2.interface;
     ballMsg.header.pSrcQueue = &dispatcher.queue;
 
-    ballMsg.initBody();
+    // Put on the Queue pointed to by pDstQueue if pDstQueue is valid
+    if (ballMsg.header.pDstQueue) |pDst| pDst.put(&ballMsg.header);
 
-    assert(ballMsg.header.pDstQueue != null);
-    ballMsg.header.pDstQueue.?.put(&ballMsg.header);
+    // Dispatch messages until there are no messages to process
     dispatcher.loop();
 
+    // Validate players hit the ball the expected number of times.
+    assert(player1.body.hits > 0);
+    assert(player2.body.hits > 0);
+    assert(player2.body.last_ball_hits > 0);
     assert(player1.body.hits + player2.body.hits == player2.body.last_ball_hits);
 
     //warn("call threadSpawn\n");
