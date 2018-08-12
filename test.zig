@@ -39,42 +39,55 @@ const PlayerBody = struct {
     max_hits: u64,
     last_ball_hits: u64,
 
-    fn init(pPlayer: *Actor(PlayerBody)) void {
-        pPlayer.body.hits = 0;
-        pPlayer.body.max_hits = 0;
-        pPlayer.body.last_ball_hits = 0;
+    fn init(pSelf: *Actor(PlayerBody)) void {
+        pSelf.body.hits = 0;
+        pSelf.body.max_hits = 0;
+        pSelf.body.last_ball_hits = 0;
 
         // Should not fail, error out in safy builds
-        pPlayer.body.allocator.init(10, 0) catch unreachable;
+        pSelf.body.allocator.init(10, 0) catch unreachable;
+        PlayerBody.abc();
     }
 
-    pub fn processMessage(pPlayerInterface: *ActorInterface, pMsgHeader: *MessageHeader) void {
-        var pPlayer = Actor(PlayerBody).getActorPtr(pPlayerInterface);
-        //warn("{*}.processMessage pMsgHeader={*} cmd={}\n", pPlayer, pMsgHeader, pMsgHeader.cmd);
-        switch(pMsgHeader.cmd) {
+    fn abc() void {
+        warn("PlayerBody.abc\n");
+    }
+
+    fn hitBall(pSelf: *Actor(PlayerBody), pMsg: *Message(Ball)) !void {
+        var pDstQ = pMsg.header.pDstQueue orelse return error.NoDstQueue;
+        var pResponse = pSelf.body.allocator.get(Message(Ball)) orelse return; // error.NoMessages;
+        pResponse.init(1);
+        pResponse.header.initSwap(&pMsg.header);
+        pResponse.body.hits = pMsg.body.hits + 1;
+        pDstQ.put(&pResponse.header);
+    }
+
+    pub fn processMessage(pActorInterface: *ActorInterface, pMsgHeader: *MessageHeader) void {
+        var pSelf: *Actor(PlayerBody) = Actor(PlayerBody).getActorPtr(pActorInterface);
+        var pMsg = Message(Ball).getMessagePtr(pMsgHeader);
+
+        //warn("{*}.processMessage pMsgHeader={*} cmd={}\n", pSelf, pMsgHeader, pMsgHeader.cmd);
+        switch(pMsg.header.cmd) {
+            0 => {
+                //warn("PlayerBody.processMessage: cmd 0 start\n");
+                PlayerBody.hitBall(pSelf, pMsg) catch |err| warn("error hitBall={}\n", err);
+            },
             1 => {
-                var pMsg = Message(Ball).getMessagePtr(pMsgHeader);
-                pPlayer.body.hits += 1;
-                pPlayer.body.last_ball_hits = pMsg.body.hits;
-                if (pPlayer.body.hits <= pPlayer.body.max_hits) {
-                    if (pMsgHeader.pDstQueue) |pDstQ| {
-                        if (pPlayer.body.allocator.get(Message(Ball))) |pResponse| {
-                            pResponse.init(1);
-                            pResponse.header.initSwap(pMsgHeader);
-                            pResponse.body.hits = pMsg.body.hits + 1;
-                            pDstQ.put(&pResponse.header);
-                        }
-                    }
+                //warn("PlayerBody.processMessage: cmd 1 ball hit to us\n");
+                pSelf.body.hits += 1;
+                pSelf.body.last_ball_hits = pMsg.body.hits;
+                if (pSelf.body.hits <= pSelf.body.max_hits) {
+                    PlayerBody.hitBall(pSelf, pMsg) catch |err| warn("error hitBall={}\n", err);
                 }
             },
             else => {
                 // Ignore unknown commands
-                warn("{*} unknown cmd={}\n", pPlayer, pMsgHeader.cmd);
+                warn("{*} unknown cmd={}\n", pSelf, pMsg.header.cmd);
             },
         }
 
         // TODO: Should process message be responsible for returning message?
-        if (pMsgHeader.pAllocator) |pAllocator| pAllocator.put(pMsgHeader);
+        if (pMsg.header.pAllocator) |pAllocator| pAllocator.put(pMsgHeader);
     }
 };
 
@@ -120,7 +133,7 @@ test "test.Actor" {
 
     // Create a message to get things going
     var ballMsg: Message(Ball) = undefined;
-    ballMsg.init(1);
+    ballMsg.init(0);
 
     ballMsg.header.pAllocator = null;
     ballMsg.header.pDstActor = &player1.interface;
@@ -134,10 +147,7 @@ test "test.Actor" {
     ballMsg.header.pDstQueue.?.put(&ballMsg.header);
     dispatcher.loop();
 
-    assert(player1.body.hits == 11);
-    assert(player1.body.last_ball_hits == 20);
-    assert(player2.body.hits == 10);
-    assert(player2.body.last_ball_hits == 19);
+    assert(player1.body.hits + player2.body.hits == player2.body.last_ball_hits);
 
     //warn("call threadSpawn\n");
     //thread0_context.init("thread0");
