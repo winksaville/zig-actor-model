@@ -36,6 +36,7 @@ pub fn MessageQueue() type {
         /// and a signalContext is available. If either are null then the signalFn
         /// will never be invoked.
         pub fn init(signalFn: ?fn(context: *SignalContext) void, pSignalContext: ?*SignalContext) Self {
+            warn("MessageQueue.init: {*}:&signal_context={*}\n", signalFn, pSignalContext);
             return Self{
                 .head = null,
                 .tail = null,
@@ -46,6 +47,8 @@ pub fn MessageQueue() type {
         }
 
         pub fn put(pSelf: *Self, mh: *MessageHeader) void {
+            //warn("MessageQueue.put:+ mh={*} cmd={}\n", mh, mh.cmd);
+            //defer warn("MessageQueue.put:- mh={*} cmd={}\n", mh, mh.cmd);
             mh.pNext = null;
 
             while (@atomicRmw(u8, &pSelf.lock, builtin.AtomicRmwOp.Xchg, 1, AtomicOrder.SeqCst) != 0) {}
@@ -54,17 +57,25 @@ pub fn MessageQueue() type {
             const opt_tail = pSelf.tail;
             pSelf.tail = mh;
             if (opt_tail) |tail| {
-                // Append
-                //warn("put: append mh={*} cmd={}\n", mh, mh.cmd);
+                //warn("put: append tail mh={*} cmd={}\n", mh, mh.cmd);
                 tail.pNext = mh;
             } else {
                 // Was empty so wakeup any waiters
+                //warn("put: firstEntry+ mh={*} cmd={}\n", mh, mh.cmd);
+                //defer warn("put: firstEntry- mh={*} cmd={}\n", mh, mh.cmd);
                 assert(pSelf.head == null);
                 pSelf.head = mh;
-                //warn("put: first entry mh={*} cmd={}\n", mh, mh.cmd);
-                if (pSelf.signalFn) |signalFn| {
-                    if (pSelf.pSignalContext) |signalContext| {
-                        signalFn(signalContext);
+                if (pSelf.signalFn) |sigFn| {
+                    if (pSelf.pSignalContext) |pSigCtx| {
+                        //warn("put: firstEntry+++sigFn={*} mh={*} cmd={} SigCtx={*}\n", &sigFn, mh, mh.cmd, pSigCtx);
+                        //defer warn("put: firstEntry---sigFn={*} mh={*} cmd={} SigCtx={*}\n", &sigFn, mh, mh.cmd, pSigCtx);
+                        //if (mh.cmd == 2) {
+                        //    warn("put: firstEntry+++sigFn={*} mh={*} cmd={} SigCtx={*}\n", &sigFn, mh, mh.cmd, pSigCtx);
+                        //}
+                        sigFn(pSigCtx);
+                        //if (mh.cmd == 2) {
+                        //    warn("put: firstEntry---sigFn={*} mh={*} cmd={} SigCtx={*}\n", &sigFn, mh, mh.cmd, pSigCtx);
+                        //}
                     }
                 }
             }
@@ -85,6 +96,19 @@ pub fn MessageQueue() type {
             }
             //warn("get: return head={*} cmd={}\n", head, head.cmd);
             return head;
+        }
+
+        pub fn format(
+            pSelf: *const Self,
+            comptime fmt: []const u8,
+            context: var,
+            comptime FmtError: type,
+            output: fn (@typeOf(context), []const u8) FmtError!void
+        ) FmtError!void {
+            try std.fmt.format(context, FmtError, output, "{{head=0x{x} tail=0x{x} lock=0x{x} signalFn=0x{x} pSignalContext=0x{x}}}",
+                if (pSelf.head) |pH| @ptrToInt(pH) else 0, if (pSelf.tail) |pT| @ptrToInt(pT) else 0,
+                pSelf.lock,
+                if (pSelf.signalFn) |sFn| @ptrToInt(sFn) else 0, if (pSelf.pSignalContext) |pCtx| @ptrToInt(pCtx) else 0);
         }
     };
 }

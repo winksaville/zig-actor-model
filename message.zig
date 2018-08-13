@@ -3,7 +3,10 @@
 
 const ActorInterface = @import("actor.zig").ActorInterface;
 const MessageAllocator = @import("message_allocator.zig").MessageAllocator;
-const MessageQueue = @import("message_queue.zig").MessageQueue;
+
+const messageQueueNs = @import("message_queue.zig");
+const MessageQueue = messageQueueNs.MessageQueue;
+const SignalContext = messageQueueNs.SignalContext;
 
 const std = @import("std");
 const assert = std.debug.assert;
@@ -110,7 +113,20 @@ pub const MessageHeader = packed struct {
         comptime FmtError: type,
         output: fn (@typeOf(context), []const u8) FmtError!void
     ) FmtError!void {
-        try std.fmt.format(context, FmtError, output, "pSrcQueue={*} pSrcActor{*} pDstQueue={*} pDstActor{*} cmd={}, ",
-                pSelf.pSrcQueue, pSelf.pSrcActor, pSelf.pDstQueue, pSelf.pDstActor, pSelf.cmd);
+        var pDstSigCtx: *SignalContext = @intToPtr(*SignalContext, 0);
+        if (pSelf.pDstQueue) |pQ| {
+            if (pQ.pSignalContext) |pCtx| {
+                pDstSigCtx = pCtx;
+            }
+        }
+        var pSrcSigCtx: *SignalContext = @intToPtr(*SignalContext, 0);
+        if (pSelf.pSrcQueue) |pQ| {
+            if (pQ.pSignalContext) |pCtx| {
+                pSrcSigCtx = pCtx;
+            }
+        }
+
+        try std.fmt.format(context, FmtError, output, "pSrcQueue={*}:{} pSrcActor={*} pDstQueue={*}:{} pDstActor={*} cmd={}, ",
+                pSelf.pSrcQueue, pSrcSigCtx, pSelf.pSrcActor, pSelf.pDstQueue, pDstSigCtx, pSelf.pDstActor, pSelf.cmd);
     }
 };

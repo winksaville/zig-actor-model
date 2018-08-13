@@ -72,6 +72,7 @@ pub fn MessageAllocator() type {
                 assert(@offsetOf(Message(packed struct {}), "header") == 0);
                 var pMh = @ptrCast(*MessageHeader, &pSelf.buffer[i * pSelf.max_msg_size]);
                 pMh.initEmpty();
+                pMh.cmd = 0xDeadbeef;
                 pSelf.put(pMh);
                 i += 1;
             }

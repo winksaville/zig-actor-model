@@ -26,7 +26,7 @@ pub fn ActorDispatcher(comptime maxActors: usize) type {
 
         // TODO: Should there be one queue per actor instead?
         pub queue: MessageQueue(),
-        pub signalContext: u32,
+        pub signal_context: u32,
         pub msg_count: u64,
         pub last_msg_cmd: u64,
         pub actor_processMessage_count: u64,
@@ -40,8 +40,9 @@ pub fn ActorDispatcher(comptime maxActors: usize) type {
             // Because we're using self referential pointers init
             // must be passed a pointer rather then returning Self
 
-            //warn("ActorDispatcher.init: {*}:&signalContext={*}\n", pSelf, &pSelf.signalContext);
-            pSelf.queue = MessageQueue().init(signalFn, &pSelf.signalContext);
+            warn("ActorDispatcher.init:+ {*}:&signal_context={*}\n", pSelf, &pSelf.signal_context);
+            defer warn("ActorDispatcher.init:- {*}:&signal_context={*}\n", pSelf, &pSelf.signal_context);
+            pSelf.queue = MessageQueue().init(Self.signalFn, &pSelf.signal_context);
             pSelf.msg_count = 0;
             pSelf.last_msg_cmd = 0;
             pSelf.actor_processMessage_count = 0;
@@ -51,29 +52,55 @@ pub fn ActorDispatcher(comptime maxActors: usize) type {
         }
 
         fn signalFn(pSignalContext: *SignalContext) void {
-            //warn("ActorDispatcher.signalFn: call wake {*}\n", pSignalContext);
+            //warn("ActorDispatcher.signalFn:+ call wake {*} $$$$$$$$$$$$$$$$$$$$\n", pSignalContext);
+            //defer warn("ActorDispatcher.signalFn:- aftr wake {*} $$$$$$$$$$$$$$$$$$$$\n", pSignalContext);
 
-            // TODO: This is to frequent and slow in simple case. For example if
+            // TODO: This is to frequent and slow in the simple case. For example, if
             // two actors are using this same dispatcher and is only ever one message
             // at a time on the queue so this gets called every passed message!
+            // TODO: This just needs to be a atomicStore.
+            //warn("%{x}-{}", @ptrToInt(pSignalContext), pSignalContext.*);
+            _ = @atomicRmw(SignalContext, pSignalContext, AtomicRmwOp.Xchg, 1, AtomicOrder.SeqCst);
+            //warn("{}", pSignalContext.*);
             futex_wake(pSignalContext, 1);
+            //warn("{}%\n", pSignalContext.*);
+        //warn("%{x}-{}%\n", @ptrToInt(pSignalContext), pSignalContext.*);
         }
 
 
         /// Add an ActorInterface to this dispatcher
         pub fn add(pSelf: *Self, pAi: *ActorInterface) !void {
-            //warn("ActorDispatcher.add: {*}:&signalContext={*}\n", pSelf, &pSelf.signalContext);
-            while (@atomicRmw(u8, &pSelf.lock, AtomicRmwOp.Xchg, 1, AtomicOrder.SeqCst) != 0) {}
+            warn("ActorDispatcher.add:+ {*}:&signal_context={*} pAi={*} processMessage={x}\n",
+                    pSelf, &pSelf.signal_context, pAi, @ptrToInt(pAi.processMessage));
+            while (@atomicRmw(u8, &pSelf.lock, AtomicRmwOp.Xchg, 1, AtomicOrder.SeqCst) == 0) {}
             defer assert(@atomicRmw(u8, &pSelf.lock, AtomicRmwOp.Xchg, 0, AtomicOrder.SeqCst) == 1);
             if (pSelf.actors_count >= pSelf.actors.len) return error.TooManyActors;
             pSelf.actors[pSelf.actors_count] = pAi;
             pSelf.actors_count += 1;
-            //warn("ActorDispatcher.add: pAi={*} processMessage={x}\n", pAi,
-            //    @ptrToInt(pSelf.actors[pSelf.actors_count-1].processMessage));
+            //warn("ActorDispatcher.add:- {*}:&signal_context={*} pAi={*} processMessage={x}\n",
+            //    pSelf, &pSelf.signal_context, pAi, @ptrToInt(pSelf.actors[pSelf.actors_count-1].processMessage));
+        }
+
+        pub fn loop(pSelf: *Self) void {
+            //warn("ActorDispatcher.loop:+ {*}:&signal_context={*}\n", pSelf, &pSelf.signal_context);
+            //defer warn("ActorDispatcher.loop:- {*}:&signal_context={*}\n", pSelf, &pSelf.signal_context);
+            while (true) {
+                var pMsgHeader = pSelf.queue.get() orelse return;
+                pSelf.msg_count += 1;
+                pSelf.last_msg_cmd = pMsgHeader.cmd;
+                if (pMsgHeader.pDstActor) |pAi| {
+                    pAi.processMessage(pAi, pMsgHeader);
+                } else {
+                    if (pMsgHeader.pAllocator) |pAllocator| {
+                        pAllocator.put(pMsgHeader);
+                    }
+                }
+            }
         }
 
         pub fn broadcastLoop(pSelf: *Self) void {
-            warn("ActorDispatcher.broadcastLoop: {*}:&signalContext={*}\n", pSelf, &pSelf.signalContext);
+            //warn("ActorDispatcher.broadcastLoop:+ {*}:&signal_context={*}\n", pSelf, &pSelf.signal_context);
+            //defer warn("ActorDispatcher.broadcastLoop:- {*}:&signal_context={*}\n", pSelf, &pSelf.signal_context);
             while (true) {
                 var pMsgHeader = pSelf.queue.get() orelse return;
                 pSelf.msg_count += 1;
@@ -85,22 +112,6 @@ pub fn ActorDispatcher(comptime maxActors: usize) type {
                     //warn("ActorDispatcher.broadcast: pAi={*} processMessage={x}\n", pAi,
                     //    @ptrToInt(pAi.processMessage));
                     pAi.processMessage(pAi, pMsgHeader);
-                }
-            }
-        }
-
-        pub fn loop(pSelf: *Self) void {
-            warn("ActorDispatcher.loop: {*}:&signalContext={*}\n", pSelf, &pSelf.signalContext);
-            while (true) {
-                var pMsgHeader = pSelf.queue.get() orelse return;
-                pSelf.msg_count += 1;
-                pSelf.last_msg_cmd = pMsgHeader.cmd;
-                if (pMsgHeader.pDstActor) |pAi| {
-                    pAi.processMessage(pAi, pMsgHeader);
-                } else {
-                    if (pMsgHeader.pAllocator) |pAllocator| {
-                        pAllocator.put(pMsgHeader);
-                    }
                 }
             }
         }
@@ -163,7 +174,8 @@ const MyActorBody = packed struct {
 test "ActorDispatcher" {
     // Create a message
     const MyMsg = Message(MyMsgBody);
-    var myMsg = MyMsg.init(123);
+    var myMsg: MyMsg = undefined;
+    myMsg.init(123);
 
     // Create an Actor
     const MyActor = Actor(MyActorBody);
@@ -182,12 +194,8 @@ test "ActorDispatcher" {
     assert(myActorDispatcher.actors_count == 1);
     assert(myActorDispatcher.actors[0].processMessage == myActor.interface.processMessage);
 
-    const Msg0 = Message(packed struct {});
-    var msg0: Msg0 = undefined;
-    msg0.header.init(123);
-
     // Place the node on the queue and broadcast to the actors
-    myActorDispatcher.queue.put(&msg0.header);
+    myActorDispatcher.queue.put(&myMsg.header);
     myActorDispatcher.broadcastLoop();
     assert(myActorDispatcher.last_msg_cmd == 123);
     assert(myActorDispatcher.msg_count == 1);

@@ -17,6 +17,12 @@ pub const ActorInterface = packed struct {
     //pQueue: ?*MessageQueue,
 
     pub processMessage: fn (actorInterface: *ActorInterface, msg: *MessageHeader) void,
+
+    // An optional function supplied by the dispatcher whcih the
+    // actor calls when it's complete. It will pass the
+    // doneFn_handle as the parameter.
+    pub doneFn: ?fn (doneFn_handle: usize) void,
+    pub doneFn_handle: usize,
 };
 
 /// Actor that can process messages. Actors implement
@@ -30,8 +36,15 @@ pub fn Actor(comptime BodyType: type) type {
         pub body: BodyType,
 
         pub fn init() Self {
+            return Self.initFull(null, 0);
+        }
+
+        pub fn initFull(doneFn: ?fn (doneFn_handle: usize) void, doneFn_handle: usize) Self {
             var self: Self = undefined;
             self.interface.processMessage = BodyType.processMessage;
+            self.interface.doneFn = doneFn;
+            self.interface.doneFn_handle = doneFn_handle;
+
             BodyType.init(&self);
             //warn("Actor.init: pAi={*} self={*} processMessage={x}\n",
             //    &self.interface, &self, @ptrToInt(self.interface.processMessage));
