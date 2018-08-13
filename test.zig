@@ -92,26 +92,7 @@ const PlayerBody = struct {
     }
 };
 
-//const ThreadContext = struct {
-//    const Self = this;
-//
-//    name_len: usize,
-//    name: [32]u8,
-//
-//    pub fn init(pSelf: *Self, name: [] const u8) void {
-//        // Set name_len and then copy with truncation
-//        pSelf.name_len = math.min(name.len, pSelf.name.len);
-//        mem.copy(u8, pSelf.name[0..pSelf.name_len], name[0..pSelf.name_len]);
-//    }
-//};
-//
-//var thread0_context: ThreadContext = undefined;
-//
-//fn threadDispatcher(context: *ThreadContext) void {
-//    warn("threadDispatcher: {}\n", context.name[0..context.name_len]);
-//}
-
-test "test.Actor" {
+test "actors-single-threaded" {
     // Create Dispatcher
     const Dispatcher = ActorDispatcher(2);
     var dispatcher: Dispatcher = undefined;
@@ -155,13 +136,4 @@ test "test.Actor" {
     assert(player2.body.hits > 0);
     assert(player2.body.last_ball_hits > 0);
     assert(player1.body.hits + player2.body.hits == player2.body.last_ball_hits);
-
-    //warn("call threadSpawn\n");
-    //thread0_context.init("thread0");
-    //warn("thread0_context.name len={} name={}\n", thread0_context.name.len,
-    //        thread0_context.name[0..thread0_context.name_len]);
-    //var thread_0 = try std.os.spawnThread(&thread0_context, threadDispatcher);
-    //warn("call wait\n");
-    //thread_0.wait();
-    //warn("call after wait\n");
 }
