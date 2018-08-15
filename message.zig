@@ -19,7 +19,8 @@ pub fn Message(comptime BodyType: type) type {
         pub header: MessageHeader, // Must be first field
         pub body: BodyType,
 
-        /// Initialize header.cmd and BodyType.init
+        /// Initialize header.cmd and BodyType.init,
+        /// NOTE: Header is NOT initialized!!!!
         pub fn init(pSelf: *Self, cmd: u64) void {
             // TODO: I'm unable to make this assert it when moving header
             //warn("{*}.init({})\n", pSelf, cmd);
@@ -28,20 +29,32 @@ pub fn Message(comptime BodyType: type) type {
             BodyType.init(&pSelf.body);
         }
 
+        /// Initialize the header to empty
         pub fn initHeaderEmpty(pSelf: *Self) void {
             pSelf.header.initEmpty();
         }
 
+        /// Initialize the body
         pub fn initBody(pSelf: *Self) void {
             BodyType.init(&pSelf.body);
         }
 
+        /// Send this message to destination queue
+        pub fn send(pSelf: *Self) !void {
+            if (pSelf.getDstQueue()) |pQ| pQ.put(&pSelf.header) else return error.NoQueue;
+        }
+
+        /// Get the destination queue
+        pub fn getDstQueue(pSelf: *const Self) ?*MessageQueue() {
+            return pSelf.header.pDstActor.?.pQueue;
+        }
 
         /// Return a pointer to the Message this MessageHeader is a member of.
         pub fn getMessagePtr(header: *MessageHeader) *Self {
             return @fieldParentPtr(Self, "header", header);
         }
 
+        /// Format the message to a byte array using the output fn
         pub fn format(
             pSelf: *const Self,
             comptime fmt: []const u8,
@@ -65,26 +78,20 @@ pub const MessageHeader = packed struct {
     // TODO: Rename as pXxxx
     pub pNext: ?*MessageHeader,
     pub pAllocator: ?*MessageAllocator(),
-    pub pSrcQueue: ?*MessageQueue(),
     pub pSrcActor: ?*ActorInterface,
-    pub pDstQueue: ?*MessageQueue(),
     pub pDstActor: ?*ActorInterface,
     pub cmd: u64,
 
     pub fn init(
         pSelf: *Self,
         pAllocator: ?*MessageAllocator(),
-        pSrcQueue: ?*MessageQueue(),
         pSrcActor: ?*ActorInterface,
-        pDstQueue: ?*MessageQueue(),
         pDstActor: ?*ActorInterface,
         cmd: u64,
     ) void {
         pSelf.pNext = null;
         pSelf.pAllocator = pAllocator;
-        pSelf.pSrcQueue = pSrcQueue;
         pSelf.pSrcActor = pSrcActor;
-        pSelf.pDstQueue = pDstQueue;
         pSelf.pDstActor = pDstActor;
         pSelf.cmd = cmd;
     }
@@ -92,18 +99,14 @@ pub const MessageHeader = packed struct {
     pub fn initEmpty(pSelf: *Self) void {
         pSelf.pNext = null;
         pSelf.pAllocator = null;
-        pSelf.pSrcQueue = null;
         pSelf.pSrcActor = null;
-        pSelf.pDstQueue = null;
         pSelf.pDstActor = null;
         pSelf.cmd = 0;
     }
 
     pub fn initSwap(pSelf: *Self, pSrcMh: *MessageHeader) void {
         pSelf.pDstActor = pSrcMh.pSrcActor;
-        pSelf.pDstQueue = pSrcMh.pSrcQueue;
         pSelf.pSrcActor = pSrcMh.pDstActor;
-        pSelf.pSrcQueue = pSrcMh.pDstQueue;
     }
 
     pub fn format(
@@ -113,20 +116,28 @@ pub const MessageHeader = packed struct {
         comptime FmtError: type,
         output: fn (@typeOf(context), []const u8) FmtError!void
     ) FmtError!void {
+        var pDstQueue: ?*MessageQueue() = null;
         var pDstSigCtx: *SignalContext = @intToPtr(*SignalContext, 0);
-        if (pSelf.pDstQueue) |pQ| {
-            if (pQ.pSignalContext) |pCtx| {
-                pDstSigCtx = pCtx;
+        if (pSelf.pDstActor) |pAi| {
+            if (pAi.pQueue) |pQ| {
+                pDstQueue = pQ;
+                if (pQ.pSignalContext) |pCtx| {
+                    pDstSigCtx = pCtx;
+                }
             }
         }
+        var pSrcQueue: ?*MessageQueue() = null;
         var pSrcSigCtx: *SignalContext = @intToPtr(*SignalContext, 0);
-        if (pSelf.pSrcQueue) |pQ| {
-            if (pQ.pSignalContext) |pCtx| {
-                pSrcSigCtx = pCtx;
+        if (pSelf.pSrcActor) |pAi| {
+            if (pAi.pQueue) |pQ| {
+                pSrcQueue = pQ;
+                if (pQ.pSignalContext) |pCtx| {
+                    pSrcSigCtx = pCtx;
+                }
             }
         }
 
-        try std.fmt.format(context, FmtError, output, "pSrcQueue={*}:{} pSrcActor={*} pDstQueue={*}:{} pDstActor={*} cmd={}, ",
-                pSelf.pSrcQueue, pSrcSigCtx, pSelf.pSrcActor, pSelf.pDstQueue, pDstSigCtx, pSelf.pDstActor, pSelf.cmd);
+        try std.fmt.format(context, FmtError, output, "pSrcActor={*}:{*}:{} pDstActor={*}:{*}:{} cmd={}, ",
+                pSelf.pSrcActor, pSrcQueue, pSrcSigCtx, pSelf.pDstActor, pDstQueue, pDstSigCtx, pSelf.cmd);
     }
 };

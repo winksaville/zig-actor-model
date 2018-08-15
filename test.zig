@@ -26,7 +26,6 @@ const assert = std.debug.assert;
 const warn = std.debug.warn;
 const mem = std.mem;
 const math = std.math;
-const Queue = std.atomic.Queue;
 
 const builtin = @import("builtin");
 const AtomicOrder = builtin.AtomicOrder;
@@ -79,9 +78,8 @@ const PlayerBody = struct {
         pResponse.init(cmd);
         pResponse.header.initSwap(&pMsg.header);
         pResponse.body.hits = pMsg.body.hits + 1;
-        var pDstQ = pResponse.header.pDstQueue orelse return error.NoDstQueue;
-        //warn("{*}.hitBall pResponse={}\n          pDstQ={}\n", pSelf, pResponse, pDstQ);
-        pDstQ.put(&pResponse.header);
+        try pResponse.send();
+        //warn("{*}.hitBall pResponse={}\n\n", pSelf, pResponse);
     }
 
     pub fn processMessage(pActorInterface: *ActorInterface, pMsgHeader: *MessageHeader) void {
@@ -168,12 +166,10 @@ test "actors-single-threaded" {
     // Initialize header fields
     ballMsg.header.pAllocator = null;
     ballMsg.header.pDstActor = &player0.interface;
-    ballMsg.header.pDstQueue = &dispatcher.queue; // Move to ActorInterface?
     ballMsg.header.pSrcActor = &player1.interface;
-    ballMsg.header.pSrcQueue = &dispatcher.queue;
 
-    // Put on the Queue pointed to by pDstQueue if pDstQueue is valid
-    if (ballMsg.header.pDstQueue) |pDst| pDst.put(&ballMsg.header);
+    // Send the message
+    try ballMsg.send();
 
     // Dispatch messages until there are no messages to process
     dispatcher.loop();
@@ -291,18 +287,11 @@ test "actors-multi-threaded" {
     // Initialize header fields
     ballMsg.header.pAllocator = null;
     ballMsg.header.pDstActor = &player0.interface;
-    ballMsg.header.pDstQueue = &thread0_context.dispatcher.queue; // Move to ActorInterface?
     ballMsg.header.pSrcActor = &player1.interface;
-    ballMsg.header.pSrcQueue = &thread1_context.dispatcher.queue;
     warn("ballMsg={}\n", &ballMsg);
 
-    // Put ballMsg on the Queue pointed to by pDstQueue if pDstQueue is valid
-    if (ballMsg.header.pDstQueue) |pDst| {
-        warn("ballMsg.header.cmd={}\n", ballMsg.header.cmd);
-        pDst.put(&ballMsg.header);
-    } else {
-        warn("No pDstQueue={}\n", ballMsg.header.pDstQueue);
-    }
+    // Send the message
+    try ballMsg.send();
 
     warn("call wait thread0\n");
     thread0.wait();

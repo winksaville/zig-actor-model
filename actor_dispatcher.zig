@@ -75,6 +75,7 @@ pub fn ActorDispatcher(comptime maxActors: usize) type {
             while (@atomicRmw(u8, &pSelf.lock, AtomicRmwOp.Xchg, 1, AtomicOrder.SeqCst) == 0) {}
             defer assert(@atomicRmw(u8, &pSelf.lock, AtomicRmwOp.Xchg, 0, AtomicOrder.SeqCst) == 1);
             if (pSelf.actors_count >= pSelf.actors.len) return error.TooManyActors;
+            pAi.pQueue = &pSelf.queue;
             pSelf.actors[pSelf.actors_count] = pAi;
             pSelf.actors_count += 1;
             //warn("ActorDispatcher.add:- {*}:&signal_context={*} pAi={*} processMessage={x}\n",

@@ -1,6 +1,9 @@
 const messageNs = @import("message.zig");
 const MessageHeader = messageNs.MessageHeader;
 
+const messageQueueNs = @import("message_queue.zig");
+const MessageQueue = messageQueueNs.MessageQueue;
+
 const std = @import("std");
 const warn = std.debug.warn;
 
@@ -11,16 +14,18 @@ const warn = std.debug.warn;
 ///
 /// There must also be a BodyType.init(*Actor(BodyType))
 pub const ActorInterface = packed struct {
-    // TODO: Add pQueue here so we don't need
-    // both a ?*MessageQueue and ?*ActorInterface in
-    // MessageHeader.
-    //pQueue: ?*MessageQueue,
-
+    // The routine which processes the actors messages.
     pub processMessage: fn (actorInterface: *ActorInterface, msg: *MessageHeader) void,
 
-    // An optional function supplied by the dispatcher whcih the
-    // actor calls when it's complete. It will pass the
-    // doneFn_handle as the parameter.
+    // An optional queue used to send messages to the actor.
+    // Typically initialized when adding the actor to
+    // a dispatcher.
+    pub pQueue: ?*MessageQueue(),
+
+    // An optional fn that the actor will call when it completes.
+    // Typicall initialized when adding the actor to
+    // a dispatcher. The doneFn_handle will be passed as
+    // a parameter to the doneFn.
     pub doneFn: ?fn (doneFn_handle: usize) void,
     pub doneFn_handle: usize,
 };
@@ -28,6 +33,9 @@ pub const ActorInterface = packed struct {
 /// Actor that can process messages. Actors implement
 /// processMessage in the BodyType passed to this Actor
 /// Type Constructor.
+///
+/// TODO: Should an actor have a fn send? Now that I've
+///       added the pQueue to an ActorInterface we can.
 pub fn Actor(comptime BodyType: type) type {
     return struct {
         const Self = this;
@@ -41,6 +49,7 @@ pub fn Actor(comptime BodyType: type) type {
 
         pub fn initFull(doneFn: ?fn (doneFn_handle: usize) void, doneFn_handle: usize) Self {
             var self: Self = undefined;
+            self.interface.pQueue = null;
             self.interface.processMessage = BodyType.processMessage;
             self.interface.doneFn = doneFn;
             self.interface.doneFn_handle = doneFn_handle;

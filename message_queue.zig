@@ -188,9 +188,7 @@ fn startPuts(ctx: *Context) u8 {
         const mh = ctx.allocator.create(MessageHeader {
             .pNext = null,
             .pAllocator = null,
-            .pSrcQueue = null,
             .pSrcActor = null,
-            .pDstQueue = null,
             .pDstActor = null,
             .cmd = x,
         }) catch unreachable;
@@ -251,15 +249,13 @@ test "MessageQueue.single-threaded" {
     assert(signal_count == 2);
 
     var mh_2: MessageHeader = undefined;
-    mh_2.init(null, null, null, null, null, 2);
+    mh_2.init(null, null, null, 2);
     queue.put(&mh_2);
 
     var mh_3 = MessageHeader {
         .pNext = null,
         .pAllocator = null,
-        .pSrcQueue = null,
         .pSrcActor = null,
-        .pDstQueue = null,
         .pDstActor = null,
         .cmd = 3,
     };
