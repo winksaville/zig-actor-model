@@ -204,7 +204,8 @@ const ThreadContext = struct {
     }
 };
 
-// TODO: This should be able to reside in ThreadContext but a compile error occurs
+// TODO: This should be able to reside in ThreadContext but a compile error occur
+// TODO: How to support multiple ActorDispatchers?
 fn threadDispatcher(pSelf: *ThreadContext) void {
     warn("threadDispatcher:+ {}\n", pSelf.name);
     defer warn("threadDispatcher:- {}\n", pSelf.name);
@@ -212,24 +213,22 @@ fn threadDispatcher(pSelf: *ThreadContext) void {
     while (@atomicLoad(u8, &pSelf.done, AtomicOrder.SeqCst) == 0) {
         pSelf.dispatcher.loop();
 
-        // TODO: Having two critical sections feels racy and is probably wrong!!!
-        if (@atomicLoad(u8, &pSelf.done, AtomicOrder.SeqCst) == 1) return;
-
         if (@atomicLoad(SignalContext, &pSelf.dispatcher.signal_context, AtomicOrder.SeqCst) == 0) {
             //warn("TD{}WAIT\n", pSelf.idn);
             futex_wait(&pSelf.dispatcher.signal_context, 0);
             //warn("TD{}RSUM{}\n", pSelf.idn, @atomicLoad(u8, &pSelf.done, AtomicOrder.SeqCst));
         }
-        _ = @atomicRmw(SignalContext, &pSelf.dispatcher.signal_context, AtomicRmwOp.Xchg, 0, AtomicOrder.SeqCst);
         //warn("TD{}LOOP{}-\n", pSelf.idn, @atomicLoad(u8, &pSelf.done, AtomicOrder.SeqCst));
     }
 }
 
-// TODO: This should be able to reside in ThreadContext but a compile error occurs
+// TODO: This should be able to reside in ThreadContext but a compile error occur
+// TODO: How to support multiple ActorDispatchers?
 fn threadDoneFn(doneFn_handle: usize) void {
     var pContext = @intToPtr(*ThreadContext, doneFn_handle);
     //warn("TD{}DONE{}+\n", pContext.idn, @atomicLoad(u8, &pContext.done, AtomicOrder.SeqCst));
-    assert(@atomicRmw(u8, &pContext.done, AtomicRmwOp.Xchg, 1, AtomicOrder.SeqCst) == 0);
+    _ = @atomicRmw(u8, &pContext.done, AtomicRmwOp.Xchg, 1, AtomicOrder.SeqCst);
+    _ = @atomicRmw(SignalContext, &pContext.dispatcher.signal_context, AtomicRmwOp.Xchg, 1, AtomicOrder.SeqCst);
     futex_wake(&pContext.dispatcher.signal_context, 1);
     //warn("TD{}DONE{}-\n", pContext.idn, @atomicLoad(u8, &pContext.done, AtomicOrder.SeqCst));
 }
@@ -264,9 +263,6 @@ test "actors-multi-threaded" {
     warn("add player0\n");
     thread0_context.player = &player0;
     try thread0_context.dispatcher.add(&player0.interface);
-    //warn("after dispatcher.add 66666666666666666666666666666\n");
-    //std.os.time.sleep(1, 1000000);
-    //warn("after sleep 1  66666666666666666666666\n");
 
     // Create player1
     //Causes error: expected type '?fn(usize) void', found '(bound fn(usize) void)'
@@ -293,11 +289,13 @@ test "actors-multi-threaded" {
     // Send the message
     try ballMsg.send();
 
-    warn("call wait thread0\n");
-    thread0.wait();
+    // Order of waiting does not mater
     warn("call wait thread1\n");
     thread1.wait();
     warn("aftr wait thread1\n");
+    warn("call wait thread0\n");
+    thread0.wait();
+    warn("aftr wait thread0\n");
 
     // Validate players hit the ball the expected number of times.
     assert(player0.body.hits > 0);

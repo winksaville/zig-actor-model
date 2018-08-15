@@ -42,6 +42,7 @@ pub fn ActorDispatcher(comptime maxActors: usize) type {
 
             warn("ActorDispatcher.init:+ {*}:&signal_context={*}\n", pSelf, &pSelf.signal_context);
             defer warn("ActorDispatcher.init:- {*}:&signal_context={*}\n", pSelf, &pSelf.signal_context);
+            pSelf.signal_context = 0;
             pSelf.queue = MessageQueue().init(Self.signalFn, &pSelf.signal_context);
             pSelf.msg_count = 0;
             pSelf.last_msg_cmd = 0;
@@ -82,16 +83,46 @@ pub fn ActorDispatcher(comptime maxActors: usize) type {
             //    pSelf, &pSelf.signal_context, pAi, @ptrToInt(pSelf.actors[pSelf.actors_count-1].processMessage));
         }
 
+        /// Loop through the message on the queue calling
+        /// the associated actor.
         pub fn loop(pSelf: *Self) void {
             //warn("ActorDispatcher.loop:+ {*}:&signal_context={*}\n", pSelf, &pSelf.signal_context);
             //defer warn("ActorDispatcher.loop:- {*}:&signal_context={*}\n", pSelf, &pSelf.signal_context);
+
+            // Clear SignalContext
+            _ = @atomicRmw(SignalContext, &pSelf.signal_context, AtomicRmwOp.Xchg, 0, AtomicOrder.SeqCst);
+
             while (true) {
+                // Return if queue is empty
                 var pMsgHeader = pSelf.queue.get() orelse return;
+
                 pSelf.msg_count += 1;
                 pSelf.last_msg_cmd = pMsgHeader.cmd;
                 if (pMsgHeader.pDstActor) |pAi| {
-                    pAi.processMessage(pAi, pMsgHeader);
+                    if (pAi.pQueue) |pQ| {
+                        if (pQ == &pSelf.queue) {
+                            pAi.processMessage(pAi, pMsgHeader);
+                        } else {
+                            // TODO: Actor is associated with a
+                            // different "dispatcher/queue". We
+                            // could:
+                            //   - put it on the other queue but
+                            //     ordering could change.
+                            //   - drop it
+                            //   - send back to src with an error
+
+                            // Right now this isn't possible so we'll
+                            // mark it as unreachable.
+                            unreachable;
+                        }
+                    } else {
+                        // TODO: No destination queue just drop??
+                        if (pMsgHeader.pAllocator) |pAllocator| {
+                            pAllocator.put(pMsgHeader);
+                        }
+                    }
                 } else {
+                    // TODO: No destination actor just drop??
                     if (pMsgHeader.pAllocator) |pAllocator| {
                         pAllocator.put(pMsgHeader);
                     }
