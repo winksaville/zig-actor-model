@@ -22,12 +22,12 @@ pub use switch(builtin.arch) {
 
 
 
-pub fn futex_wait(pVal: *i32, expected_value: u32) void {
+pub fn futex_wait(pVal: *u32, expected_value: u32) void {
     //warn("futex_wait: {*}\n", pVal);
     _ = syscall4(SYS_futex, @ptrToInt(pVal), linux.FUTEX_WAIT, expected_value, 0);
 }
 
-pub fn futex_wake(pVal: *i32, num_threads_to_wake: u32) void {
+pub fn futex_wake(pVal: *u32, num_threads_to_wake: u32) void {
     //warn("futex_wake: {*}\n", pVal);
     _ = syscall4(SYS_futex, @ptrToInt(pVal), linux.FUTEX_WAKE, num_threads_to_wake, 0);
 }
@@ -51,7 +51,7 @@ var gConsumer_context: ThreadContext = undefined;
 const naive = true;
 const consumeSignal = 0;
 const produceSignal = 1;
-var produce: i32 = consumeSignal;
+var produce: u32 = consumeSignal;
 var gCounter: u64 = 0;
 var gProducerWaitCount: u64 = 0;
 var gConsumerWaitCount: u64 = 0;
@@ -59,14 +59,34 @@ var gProducerWakeCount: u64 = 0;
 var gConsumerWakeCount: u64 = 0;
 
 const max_counter = 10000000;
-const stallCountWait: u32 = 1000;
-const stallCountWake: u32 = 200;
+const stallCountWait: u32 = 10000;
+const stallCountWake: u32 = 2000;
+
+fn stallWhileNotDesiredVal(stallCount: u64, pValue: *u32, desiredValue: u32) u32 {
+    var count = stallCount;
+    var val = @atomicLoad(u32, pValue, AtomicOrder.SeqCst);
+    while ((val != desiredValue) and (count > 0)) {
+        val = @atomicLoad(u32, pValue, AtomicOrder.SeqCst);
+        count -= 1;
+    }
+    return val;
+}
+
+fn stallWhileDesiredVal(stallCount: u64, pValue: *u32, desiredValue: u32) u32 {
+    var count = stallCount;
+    var val = @atomicLoad(u32, pValue, AtomicOrder.SeqCst);
+    while ((val == desiredValue) and (count > 0)) {
+        val = @atomicLoad(u32, pValue, AtomicOrder.SeqCst);
+        count -= 1;
+    }
+    return val;
+}
 
 fn producer(pContext: *ThreadContext) void {
     if (pContext.mode == naive) {
         while (pContext.counter < max_counter) {
             // Wait for the produce to be the produceSignal
-            while (@atomicLoad(@typeOf(produce), &produce, AtomicOrder.SeqCst) != produceSignal) {
+            while (@atomicLoad(@typeOf(produce), &produce, AtomicOrder.SeqCst) == consumeSignal) {
                 gProducerWaitCount += 1;
                 futex_wait(&produce, consumeSignal);
             }
@@ -83,13 +103,9 @@ fn producer(pContext: *ThreadContext) void {
     } else {
         while (pContext.counter < max_counter) {
             // Wait for the produce to be the produceSignal
-            var count = stallCountWait;
-            var produce_val = @atomicLoad(@typeOf(produce), &produce, AtomicOrder.SeqCst);
-            while ((produce_val != produceSignal) and (count > 0)) {
-                produce_val = @atomicLoad(@typeOf(produce), &produce, AtomicOrder.SeqCst);
-                count -= 1;
-            }
-            while (produce_val != produceSignal) {
+            var produce_val = @noInlineCall(stallWhileDesiredVal, stallCountWait, &produce, consumeSignal);
+            //var produce_val = stallWhileDesiredVal(stallCountWait, &produce, consumeSignal);
+            while (produce_val == consumeSignal) {
                 gProducerWaitCount += 1;
                 futex_wait(&produce, consumeSignal);
                 produce_val = @atomicLoad(@typeOf(produce), &produce, AtomicOrder.SeqCst);
@@ -103,12 +119,8 @@ fn producer(pContext: *ThreadContext) void {
             _ = @atomicRmw(@typeOf(produce), &produce, AtomicRmwOp.Xchg, consumeSignal, AtomicOrder.SeqCst);
 
             // Wake up consumer if needed
-            count = stallCountWake;
-            produce_val = @atomicLoad(@typeOf(produce), &produce, AtomicOrder.SeqCst);
-            while ((produce_val == consumeSignal) and (count > 0)) {
-                produce_val = @atomicLoad(@typeOf(produce), &produce, AtomicOrder.SeqCst);
-                count -= 1;
-            }
+            produce_val = @noInlineCall(stallWhileDesiredVal, stallCountWake, &produce, consumeSignal);
+            //produce_val = stallWhileDesiredVal(stallCountWake, &produce, consumeSignal);
             if (produce_val == consumeSignal) {
                 gProducerWakeCount += 1;
                 futex_wake(&produce, 1);
@@ -141,24 +153,16 @@ fn consumer(pContext: *ThreadContext) void {
             _ = @atomicRmw(@typeOf(produce), &produce, AtomicRmwOp.Xchg, produceSignal, AtomicOrder.SeqCst);
 
             // Wake up producer if needed
-            var count = stallCountWake;
-            var produce_val = @atomicLoad(@typeOf(produce), &produce, AtomicOrder.SeqCst);
-            while ((produce_val == produceSignal) and (count > 0)) {
-                produce_val = @atomicLoad(@typeOf(produce), &produce, AtomicOrder.SeqCst);
-                count -= 1;
-            }
+            var produce_val = @noInlineCall(stallWhileDesiredVal, stallCountWake, &produce, produceSignal);
+            //var produce_val = stallWhileDesiredVal(stallCountWake, &produce, produceSignal);
             if (produce_val == produceSignal) {
                 gConsumerWakeCount += 1;
                 futex_wake(&produce, 1);
             }
 
             // Wait for producer to produce
-            count = stallCountWait;
-            produce_val = @atomicLoad(@typeOf(produce), &produce, AtomicOrder.SeqCst);
-            while ((produce_val == produceSignal) and (count > 0)) {
-                produce_val = @atomicLoad(@typeOf(produce), &produce, AtomicOrder.SeqCst);
-                count -= 1;
-            }
+            produce_val = @noInlineCall(stallWhileDesiredVal, stallCountWait, &produce, produceSignal);
+            //produce_val = stallWhileDesiredVal(stallCountWait, &produce, produceSignal);
             while (produce_val == produceSignal) {
                 gConsumerWaitCount += 1;
                 futex_wait(&produce, produceSignal);
