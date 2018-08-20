@@ -35,6 +35,7 @@ pub fn MessageQueue() type {
         /// When the first message is added to an empty signalFn is invoked if it
         /// and a signalContext is available. If either are null then the signalFn
         /// will never be invoked.
+        /// TODO: Consider signalFn taking an opaque usize as a parameter?
         pub fn init(signalFn: ?fn(context: *SignalContext) void, pSignalContext: ?*SignalContext) Self {
             warn("MessageQueue.init: {*}:&signal_context={*}\n", signalFn, pSignalContext);
             return Self{
