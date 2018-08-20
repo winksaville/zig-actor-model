@@ -52,23 +52,6 @@ pub fn ActorDispatcher(comptime maxActors: usize) type {
             pSelf.actors = undefined;
         }
 
-        fn signalFn(pSignalContext: *SignalContext) void {
-            //warn("ActorDispatcher.signalFn:+ call wake {*} $$$$$$$$$$$$$$$$$$$$\n", pSignalContext);
-            //defer warn("ActorDispatcher.signalFn:- aftr wake {*} $$$$$$$$$$$$$$$$$$$$\n", pSignalContext);
-
-            // TODO: This is to frequent and slow in the simple case. For example, if
-            // two actors are using this same dispatcher and is only ever one message
-            // at a time on the queue so this gets called every passed message!
-            // TODO: This just needs to be a atomicStore.
-            //warn("%{x}-{}", @ptrToInt(pSignalContext), pSignalContext.*);
-            _ = @atomicRmw(SignalContext, pSignalContext, AtomicRmwOp.Xchg, 1, AtomicOrder.SeqCst);
-            //warn("{}", pSignalContext.*);
-            futex_wake(pSignalContext, 1);
-            //warn("{}%\n", pSignalContext.*);
-        //warn("%{x}-{}%\n", @ptrToInt(pSignalContext), pSignalContext.*);
-        }
-
-
         /// Add an ActorInterface to this dispatcher
         pub fn add(pSelf: *Self, pAi: *ActorInterface) !void {
             warn("ActorDispatcher.add:+ {*}:&signal_context={*} pAi={*} processMessage={x}\n",
@@ -83,18 +66,37 @@ pub fn ActorDispatcher(comptime maxActors: usize) type {
             //    pSelf, &pSelf.signal_context, pAi, @ptrToInt(pSelf.actors[pSelf.actors_count-1].processMessage));
         }
 
+        fn signalFn(pSignalContext: *SignalContext) void {
+            //warn("ActorDispatcher.signalFn:+ call wake {*}:{}\n", pSignalContext, pSignalContext.*);
+            //defer warn("ActorDispatcher.signalFn:- aftr wake {*}:{}\n", pSignalContext, pSignalContext.*);
+
+            // Set signal_context and get old value which if 0 then we know the thread is or has gone to sleep.
+            // So we'll call futex_wake as there is only one ActorDispatcher per thread. In the future,
+            // if/when there are multiple ActorDispatchers per thread this might need to change.
+            if (0 == @atomicRmw(SignalContext, pSignalContext, AtomicRmwOp.Xchg, 1, AtomicOrder.SeqCst)) {
+                //warn("ActorDispatcher.signalFn: call wake {*}:{}\n", pSignalContext, pSignalContext.*);
+                futex_wake(pSignalContext, 1);
+            }
+        }
+
         /// Loop through the message on the queue calling
         /// the associated actor.
-        pub fn loop(pSelf: *Self) void {
+        /// @return true if queue is empty
+        pub fn loop(pSelf: *Self) bool {
             //warn("ActorDispatcher.loop:+ {*}:&signal_context={*}\n", pSelf, &pSelf.signal_context);
             //defer warn("ActorDispatcher.loop:- {*}:&signal_context={*}\n", pSelf, &pSelf.signal_context);
 
-            // Clear SignalContext
-            _ = @atomicRmw(SignalContext, &pSelf.signal_context, AtomicRmwOp.Xchg, 0, AtomicOrder.SeqCst);
-
+            // TODO: limit number of loops or time so we don't starve other actors
+            // that we maybe sharing the thread with.
             while (true) {
                 // Return if queue is empty
-                var pMsgHeader = pSelf.queue.get() orelse return;
+                var pMsgHeader = pSelf.queue.get() orelse {
+                    // We're racing with signalFn if we win and store the 0 then
+                    // we "know" we're going to sleep as right now there is only
+                    // one ActorDispatcher per thread. When/if there ever is more
+                    // than one then we need to change this and signalFn.
+                    return @atomicRmw(SignalContext, &pSelf.signal_context, AtomicRmwOp.Xchg, 0, AtomicOrder.SeqCst) == 0;
+                };
 
                 pSelf.msg_count += 1;
                 pSelf.last_msg_cmd = pMsgHeader.cmd;

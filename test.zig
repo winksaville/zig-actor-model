@@ -102,16 +102,16 @@ const PlayerBody = struct {
                     PlayerBody.hitBall(pSelf, 1, pMsg) catch |err| warn("error hitBall={}\n", err);
                 } else {
                     // Last ball
-                    //warn("{*}.processMessage LASTBALL pMsgHeader={*} cmd={} hits={}\n",
-                    //    pSelf, pMsgHeader, pMsgHeader.cmd, pSelf.body.hits);
+                    warn("{*}.processMessage LASTBALL pMsgHeader={*} cmd={} hits={}\n",
+                        pSelf, pMsgHeader, pMsgHeader.cmd, pSelf.body.hits);
                     if (pSelf.interface.doneFn) |doneFn| {
-                        //warn("{*}.processMessage DONE pMsgHeader={*} cmd={} hits={} call doneFn\n",
-                        //    pSelf, pMsgHeader, pMsgHeader.cmd, pSelf.body.hits);
+                        warn("{*}.processMessage DONE pMsgHeader={*} cmd={} hits={} call doneFn\n",
+                            pSelf, pMsgHeader, pMsgHeader.cmd, pSelf.body.hits);
                         doneFn(pSelf.interface.doneFn_handle);
                     }
                     // Tell partner game over
-                    //warn("{*}.processMessage TELLPRTR pMsgHeader={*} cmd={} hits={}\n",
-                    //    pSelf, pMsgHeader, pMsgHeader.cmd, pSelf.body.hits);
+                    warn("{*}.processMessage TELLPRTR pMsgHeader={*} cmd={} hits={}\n",
+                        pSelf, pMsgHeader, pMsgHeader.cmd, pSelf.body.hits);
                     PlayerBody.hitBall(pSelf, 2, pMsg) catch |err| warn("error hitBall={}\n", err);
                 }
             },
@@ -172,7 +172,7 @@ test "actors-single-threaded" {
     try ballMsg.send();
 
     // Dispatch messages until there are no messages to process
-    dispatcher.loop();
+    _ = dispatcher.loop();
 
     // Validate players hit the ball the expected number of times.
     assert(player0.body.hits > 0);
@@ -211,14 +211,10 @@ fn threadDispatcher(pSelf: *ThreadContext) void {
     defer warn("threadDispatcher:- {}\n", pSelf.name);
 
     while (@atomicLoad(u8, &pSelf.done, AtomicOrder.SeqCst) == 0) {
-        pSelf.dispatcher.loop();
-
-        if (@atomicLoad(SignalContext, &pSelf.dispatcher.signal_context, AtomicOrder.SeqCst) == 0) {
+        if (pSelf.dispatcher.loop()) {
             //warn("TD{}WAIT\n", pSelf.idn);
             futex_wait(&pSelf.dispatcher.signal_context, 0);
-            //warn("TD{}RSUM{}\n", pSelf.idn, @atomicLoad(u8, &pSelf.done, AtomicOrder.SeqCst));
         }
-        //warn("TD{}LOOP{}-\n", pSelf.idn, @atomicLoad(u8, &pSelf.done, AtomicOrder.SeqCst));
     }
 }
 
@@ -241,9 +237,9 @@ test "actors-multi-threaded" {
     thread0_context.init(0, "thread0");
     thread1_context.init(1, "thread1");
 
-    warn("call threadSpawn\n");
     var thread0 = try std.os.spawnThread(&thread0_context, threadDispatcher);
     var thread1 = try std.os.spawnThread(&thread1_context, threadDispatcher);
+    warn("threads Spawned\n");
 
     //Causes zig compiler to crash at a zig_unreachable in hash_const_val()
     //case TypeTableEntryIdUnreachable: in src/analyze.cpp approx line 4762
