@@ -22,7 +22,7 @@ const AtomicRmwOp = builtin.AtomicRmwOp;
 /// Dispatches messages to actors
 pub fn ActorDispatcher(comptime maxActors: usize) type {
     return struct {
-        const Self = this;
+        const Self = @This();
 
         // TODO: Should there be one queue per actor instead?
         pub queue: MessageQueue(),
@@ -159,7 +159,7 @@ const Actor = actorNs.Actor;
 const mem = std.mem;
 
 const MyMsgBody = packed struct {
-    const Self = this;
+    const Self = @This();
     data: [3]u8,
 
     fn init(pSelf: *Self) void {
@@ -186,7 +186,7 @@ const MyMsgBody = packed struct {
 };
 
 const MyActorBody = packed struct {
-    const Self = this;
+    const Self = @This();
 
     count: u64,
 

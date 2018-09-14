@@ -35,7 +35,7 @@ pub const Style = enum {
 
 pub fn Mutex(comptime mutexType: Style) type {
     return struct {
-        const Self = this;
+        const Self = @This();
 
         const simple = switch(mutexType) {
             Style.Simple => Style.Simple,
@@ -66,7 +66,7 @@ pub fn Mutex(comptime mutexType: Style) type {
 }
 
 const ThreadContext = struct {
-    const Self = this;
+    const Self = @This();
 
     name_len: usize,
     name: [32]u8,

@@ -14,7 +14,7 @@ const warn = std.debug.warn;
 
 pub fn Message(comptime BodyType: type) type {
     return packed struct {
-        const Self = this;
+        const Self = @This();
 
         pub header: MessageHeader, // Must be first field
         pub body: BodyType,
@@ -73,7 +73,7 @@ pub fn Message(comptime BodyType: type) type {
 }
 
 pub const MessageHeader = packed struct {
-    const Self = this;
+    const Self = @This();
 
     // TODO: Rename as pXxxx
     pub pNext: ?*MessageHeader,

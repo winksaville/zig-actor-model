@@ -34,7 +34,7 @@ pub fn futex_wake(pVal: *u32, num_threads_to_wake: u32) void {
 
 
 const ThreadContext = struct {
-    const Self = this;
+    const Self = @This();
 
     mode: bool,
     counter: u128,

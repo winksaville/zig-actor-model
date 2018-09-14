@@ -23,7 +23,7 @@ pub const SignalContext = switch (builtin.os) {
 /// Uses a spinlock to protect get() and put() and thus is non-blocking
 pub fn MessageQueue() type {
     return struct {
-        pub const Self = this;
+        pub const Self = @This();
 
         head: ?*MessageHeader,
         tail: ?*MessageHeader,

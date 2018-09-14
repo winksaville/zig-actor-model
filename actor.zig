@@ -38,7 +38,7 @@ pub const ActorInterface = packed struct {
 ///       added the pQueue to an ActorInterface we can.
 pub fn Actor(comptime BodyType: type) type {
     return struct {
-        const Self = this;
+        const Self = @This();
 
         pub interface: ActorInterface,
         pub body: BodyType,
@@ -75,7 +75,7 @@ const mem = std.mem;
 const assert = std.debug.assert;
 
 const MyMsgBody = packed struct {
-    const Self = this;
+    const Self = @This();
     data: [3]u8,
 
     fn init(pSelf: *Self) void {
@@ -102,7 +102,7 @@ const MyMsgBody = packed struct {
 };
 
 const MyActorBody = struct {
-    const Self = this;
+    const Self = @This();
 
     count: u64,
 

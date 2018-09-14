@@ -32,7 +32,7 @@ const AtomicOrder = builtin.AtomicOrder;
 const AtomicRmwOp = builtin.AtomicRmwOp;
 
 const Ball = packed struct {
-    const Self = this;
+    const Self = @This();
 
     hits: u64,
 
@@ -53,7 +53,7 @@ const Ball = packed struct {
 };
 
 const PlayerBody = struct {
-    const Self = this;
+    const Self = @This();
 
     allocator: MessageAllocator(),
     hits: u64,
@@ -182,7 +182,7 @@ test "actors-single-threaded" {
 }
 
 const ThreadContext = struct {
-    const Self = this;
+    const Self = @This();
 
     idn: u8,
     name_len: usize,

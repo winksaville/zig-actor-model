@@ -39,7 +39,7 @@ const DirectAllocator = std.heap.DirectAllocator;
 pub fn MessageAllocator() type {
 
     return struct {
-        pub const Self = this;
+        pub const Self = @This();
 
         direct_allocator: DirectAllocator,
         allocator: Allocator,
@@ -132,7 +132,7 @@ test "MessageAllocator.1" {
 
     // Create a Msg type and an array of messages
     const Msg = Message(packed struct {
-        const Self = this;
+        const Self = @This();
 
         buffer: [2048]u8,
 
