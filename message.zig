@@ -24,7 +24,7 @@ pub fn Message(comptime BodyType: type) type {
         pub fn init(pSelf: *Self, cmd: u64) void {
             // TODO: I'm unable to make this assert it when moving header
             //warn("{*}.init({})\n", pSelf, cmd);
-            assert(@offsetOf(Message(packed struct {}), "header") == 0);
+            assert(@byteOffsetOf(Message(packed struct {}), "header") == 0);
             pSelf.header.cmd = cmd;
             BodyType.init(&pSelf.body);
         }

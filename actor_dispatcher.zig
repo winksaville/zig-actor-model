@@ -139,9 +139,9 @@ pub fn ActorDispatcher(comptime maxActors: usize) type {
                 var pMsgHeader = pSelf.queue.get() orelse return;
                 pSelf.msg_count += 1;
                 pSelf.last_msg_cmd = pMsgHeader.cmd;
-                for (pSelf.actors) |pAi, i| {
-                    if (i >= pSelf.actors_count) break;
-                    if (pAi == null) continue;
+                var i: usize = 0;
+                while (i < pSelf.actors_count) : (i += 1) {
+                    var pAi = pSelf.actors[i];
                     pSelf.actor_processMessage_count += 1;
                     //warn("ActorDispatcher.broadcast: pAi={*} processMessage={x}\n", pAi,
                     //    @ptrToInt(pAi.processMessage));

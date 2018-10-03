@@ -69,7 +69,7 @@ pub fn MessageAllocator() type {
             // Carve up the buffer placing the messages on the queue
             var i: usize = 0;
             while (i < msg_count) {
-                assert(@offsetOf(Message(packed struct {}), "header") == 0);
+                assert(@byteOffsetOf(Message(packed struct {}), "header") == 0);
                 var pMh = @ptrCast(*MessageHeader, &pSelf.buffer[i * pSelf.max_msg_size]);
                 pMh.initEmpty();
                 pMh.cmd = 0xDeadbeef;
