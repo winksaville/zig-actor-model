@@ -202,32 +202,30 @@ const ThreadContext = struct {
 
         pSelf.dispatcher.init();
     }
-};
 
-// TODO: This should be able to reside in ThreadContext but a compile error occur
-// TODO: How to support multiple ActorDispatchers?
-fn threadDispatcher(pSelf: *ThreadContext) void {
-    warn("threadDispatcher:+ {}\n", pSelf.name);
-    defer warn("threadDispatcher:- {}\n", pSelf.name);
+    // TODO: How to support multiple ActorDispatchers?
+    fn threadDispatcherFn(pSelf: *ThreadContext) void {
+        warn("threadDispatcherFn:+ {}\n", pSelf.name);
+        defer warn("threadDispatcherFn:- {}\n", pSelf.name);
 
-    while (@atomicLoad(u8, &pSelf.done, AtomicOrder.SeqCst) == 0) {
-        if (pSelf.dispatcher.loop()) {
-            //warn("TD{}WAIT\n", pSelf.idn);
-            futex_wait(&pSelf.dispatcher.signal_context, 0);
+        while (@atomicLoad(u8, &pSelf.done, AtomicOrder.SeqCst) == 0) {
+            if (pSelf.dispatcher.loop()) {
+                //warn("TD{}WAIT\n", pSelf.idn);
+                futex_wait(&pSelf.dispatcher.signal_context, 0);
+            }
         }
     }
-}
 
-// TODO: This should be able to reside in ThreadContext but a compile error occur
-// TODO: How to support multiple ActorDispatchers?
-fn threadDoneFn(doneFn_handle: usize) void {
-    var pContext = @intToPtr(*ThreadContext, doneFn_handle);
-    //warn("TD{}DONE{}+\n", pContext.idn, @atomicLoad(u8, &pContext.done, AtomicOrder.SeqCst));
-    _ = @atomicRmw(u8, &pContext.done, AtomicRmwOp.Xchg, 1, AtomicOrder.SeqCst);
-    _ = @atomicRmw(SignalContext, &pContext.dispatcher.signal_context, AtomicRmwOp.Xchg, 1, AtomicOrder.SeqCst);
-    futex_wake(&pContext.dispatcher.signal_context, 1);
-    //warn("TD{}DONE{}-\n", pContext.idn, @atomicLoad(u8, &pContext.done, AtomicOrder.SeqCst));
-}
+    // TODO: How to support multiple ActorDispatchers?
+    fn threadDoneFn(doneFn_handle: usize) void {
+        var pContext = @intToPtr(*ThreadContext, doneFn_handle);
+        //warn("TD{}DONE{}+\n", pContext.idn, @atomicLoad(u8, &pContext.done, AtomicOrder.SeqCst));
+        _ = @atomicRmw(u8, &pContext.done, AtomicRmwOp.Xchg, 1, AtomicOrder.SeqCst);
+        _ = @atomicRmw(SignalContext, &pContext.dispatcher.signal_context, AtomicRmwOp.Xchg, 1, AtomicOrder.SeqCst);
+        futex_wake(&pContext.dispatcher.signal_context, 1);
+        //warn("TD{}DONE{}-\n", pContext.idn, @atomicLoad(u8, &pContext.done, AtomicOrder.SeqCst));
+    }
+};
 
 var thread0_context: ThreadContext = undefined;
 var thread1_context: ThreadContext = undefined;
@@ -237,14 +235,9 @@ test "actors-multi-threaded" {
     thread0_context.init(0, "thread0");
     thread1_context.init(1, "thread1");
 
-    var thread0 = try std.os.spawnThread(&thread0_context, threadDispatcher);
-    var thread1 = try std.os.spawnThread(&thread1_context, threadDispatcher);
+    var thread0 = try std.os.spawnThread(&thread0_context, ThreadContext.threadDispatcherFn);
+    var thread1 = try std.os.spawnThread(&thread1_context, ThreadContext.threadDispatcherFn);
     warn("threads Spawned\n");
-
-    //Causes zig compiler to crash at a zig_unreachable in hash_const_val()
-    //case TypeTableEntryIdUnreachable: in src/analyze.cpp approx line 4762
-    //var thread0 = try std.os.spawnThread(&thread0_context, thread0_context.threadDispatcher);
-    //var thread1 = try std.os.spawnThread(&thread1_context, thread1_context.threadDispatcher);
 
     // Create a Player type
     const Player = Actor(PlayerBody);
@@ -253,7 +246,7 @@ test "actors-multi-threaded" {
     // Create player0
     //Causes error: expected type '?fn(usize) void', found '(bound fn(usize) void)'
     //var player0 = Player.initFull(thread0_context.doneFn, @ptrToInt(&thread0_context));
-    var player0 = Player.initFull(threadDoneFn, @ptrToInt(&thread0_context));
+    var player0 = Player.initFull(ThreadContext.threadDoneFn, @ptrToInt(&thread0_context));
     player0.body.max_hits = max_hits;
     assert(player0.body.hits == 0);
     warn("add player0\n");
@@ -263,7 +256,7 @@ test "actors-multi-threaded" {
     // Create player1
     //Causes error: expected type '?fn(usize) void', found '(bound fn(usize) void)'
     //var player1 = Player.initFull(thread1_context.doneFn, @ptrToInt(&thread1_context));
-    var player1 = Player.initFull(threadDoneFn, @ptrToInt(&thread1_context));
+    var player1 = Player.initFull(ThreadContext.threadDoneFn, @ptrToInt(&thread1_context));
     player1.body.max_hits = max_hits;
     assert(player1.body.hits == 0);
     warn("add player1\n");
