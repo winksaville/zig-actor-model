@@ -52,7 +52,7 @@ const Ball = packed struct {
     }
 };
 
-const PlayerBody = struct {
+const Player = struct {
     const Self = @This();
 
     allocator: MessageAllocator(),
@@ -60,7 +60,7 @@ const PlayerBody = struct {
     max_hits: u64,
     last_ball_hits: u64,
 
-    fn init(pSelf: *Actor(PlayerBody)) void {
+    fn init(pSelf: *Actor(Player)) void {
         pSelf.body.hits = 0;
         pSelf.body.max_hits = 0;
         pSelf.body.last_ball_hits = 0;
@@ -69,11 +69,11 @@ const PlayerBody = struct {
         pSelf.body.allocator.init(10, 0) catch unreachable;
     }
 
-    fn initDone(pSelf: *Actor(PlayerBody), pDone: *Done) void {
+    fn initDone(pSelf: *Actor(Player), pDone: *Done) void {
         pSelf.body.pDone = pDone;
     }
 
-    fn hitBall(pSelf: *Actor(PlayerBody), cmd: u64, pMsg: *Message(Ball)) !void {
+    fn hitBall(pSelf: *Actor(Player), cmd: u64, pMsg: *Message(Ball)) !void {
         var pResponse = pSelf.body.allocator.get(Message(Ball)) orelse return; // error.NoMessages;
         pResponse.init(cmd);
         pResponse.header.initSwap(&pMsg.header);
@@ -83,7 +83,7 @@ const PlayerBody = struct {
     }
 
     pub fn processMessage(pActorInterface: *ActorInterface, pMsgHeader: *MessageHeader) void {
-        var pSelf: *Actor(PlayerBody) = Actor(PlayerBody).getActorPtr(pActorInterface);
+        var pSelf: *Actor(Player) = Actor(Player).getActorPtr(pActorInterface);
         var pMsg = Message(Ball).getMessagePtr(pMsgHeader);
 
         //warn("{*}.processMessage pMsg={}\n", pSelf, pMsg);
@@ -91,7 +91,7 @@ const PlayerBody = struct {
             0 => {
                 warn("{*}.processMessage START pMsgHeader={*} cmd={}\n", pSelf, pMsgHeader, pMsgHeader.cmd);
                 // First Ball
-                PlayerBody.hitBall(pSelf, 1, pMsg) catch |err| warn("error hitBall={}\n", err);
+                Player.hitBall(pSelf, 1, pMsg) catch |err| warn("error hitBall={}\n", err);
             },
             1 => {
                 //warn("{*}.processMessage ONE pMsgHeader={*} cmd={}\n", pSelf, pMsgHeader, pMsgHeader.cmd);
@@ -99,7 +99,7 @@ const PlayerBody = struct {
                 pSelf.body.last_ball_hits = pMsg.body.hits;
                 if (pSelf.body.hits <= pSelf.body.max_hits) {
                     // Regular Balls
-                    PlayerBody.hitBall(pSelf, 1, pMsg) catch |err| warn("error hitBall={}\n", err);
+                    Player.hitBall(pSelf, 1, pMsg) catch |err| warn("error hitBall={}\n", err);
                 } else {
                     // Last ball
                     warn("{*}.processMessage LASTBALL pMsgHeader={*} cmd={} hits={}\n",
@@ -112,7 +112,7 @@ const PlayerBody = struct {
                     // Tell partner game over
                     warn("{*}.processMessage TELLPRTR pMsgHeader={*} cmd={} hits={}\n",
                         pSelf, pMsgHeader, pMsgHeader.cmd, pSelf.body.hits);
-                    PlayerBody.hitBall(pSelf, 2, pMsg) catch |err| warn("error hitBall={}\n", err);
+                    Player.hitBall(pSelf, 2, pMsg) catch |err| warn("error hitBall={}\n", err);
                 }
             },
             2 => {
@@ -142,18 +142,18 @@ test "actors-single-threaded" {
     var dispatcher: Dispatcher = undefined;
     dispatcher.init();
 
-    // Create a Player type
-    const Player = Actor(PlayerBody);
+    // Create a PlayerActor type
+    const PlayerActor = Actor(Player);
     const max_hits = 10;
 
     // Create player0
-    var player0 = Player.init();
+    var player0 = PlayerActor.init();
     player0.body.max_hits = max_hits;
     assert(player0.body.hits == 0);
     try dispatcher.add(&player0.interface);
 
     // Create player1
-    var player1 = Player.init();
+    var player1 = PlayerActor.init();
     player1.body.max_hits = max_hits;
     assert(player1.body.hits == 0);
     try dispatcher.add(&player1.interface);
@@ -189,8 +189,6 @@ const ThreadContext = struct {
     name: [32]u8,
     done: u8,
     dispatcher: ActorDispatcher(1),
-
-    player: *Actor(PlayerBody),
 
     pub fn init(pSelf: *Self, idn: u8, name: [] const u8) void {
         // Set name_len and then copy with truncation
@@ -231,7 +229,7 @@ var thread0_context: ThreadContext = undefined;
 var thread1_context: ThreadContext = undefined;
 
 test "actors-multi-threaded" {
-    warn("call thread_context init's\n");
+    warn("\ncall thread_context init's\n");
     thread0_context.init(0, "thread0");
     thread1_context.init(1, "thread1");
 
@@ -239,28 +237,22 @@ test "actors-multi-threaded" {
     var thread1 = try std.os.spawnThread(&thread1_context, ThreadContext.threadDispatcherFn);
     warn("threads Spawned\n");
 
-    // Create a Player type
-    const Player = Actor(PlayerBody);
+    // Create a PlayerActor type
+    const PlayerActor = Actor(Player);
     const max_hits = 10;
 
     // Create player0
-    //Causes error: expected type '?fn(usize) void', found '(bound fn(usize) void)'
-    //var player0 = Player.initFull(thread0_context.doneFn, @ptrToInt(&thread0_context));
-    var player0 = Player.initFull(ThreadContext.threadDoneFn, @ptrToInt(&thread0_context));
+    var player0 = PlayerActor.initFull(ThreadContext.threadDoneFn, @ptrToInt(&thread0_context));
     player0.body.max_hits = max_hits;
     assert(player0.body.hits == 0);
     warn("add player0\n");
-    thread0_context.player = &player0;
     try thread0_context.dispatcher.add(&player0.interface);
 
     // Create player1
-    //Causes error: expected type '?fn(usize) void', found '(bound fn(usize) void)'
-    //var player1 = Player.initFull(thread1_context.doneFn, @ptrToInt(&thread1_context));
-    var player1 = Player.initFull(ThreadContext.threadDoneFn, @ptrToInt(&thread1_context));
+    var player1 = PlayerActor.initFull(ThreadContext.threadDoneFn, @ptrToInt(&thread1_context));
     player1.body.max_hits = max_hits;
     assert(player1.body.hits == 0);
     warn("add player1\n");
-    thread1_context.player = &player1;
     try thread1_context.dispatcher.add(&player1.interface);
 
     // Create a message to get things going
