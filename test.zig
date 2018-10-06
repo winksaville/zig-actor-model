@@ -5,10 +5,6 @@ const actorNs = @import("actor.zig");
 const Actor = actorNs.Actor;
 const ActorInterface = actorNs.ActorInterface;
 
-const futexNs = @import("futex.zig");
-const futex_wait = futexNs.futex_wait;
-const futex_wake = futexNs.futex_wake;
-
 const msgNs = @import("message.zig");
 const Message = msgNs.Message;
 const MessageHeader = msgNs.MessageHeader;
@@ -19,6 +15,9 @@ const SignalContext = messageQueueNs.SignalContext;
 const MessageAllocator = @import("message_allocator.zig").MessageAllocator;
 
 const ActorDispatcher = @import("actor_dispatcher.zig").ActorDispatcher;
+
+const actorModelNs = @import("actor_model.zig");
+const ActorThreadContext = actorModelNs.ActorThreadContext;
 
 const std = @import("std");
 const bufPrint = std.fmt.bufPrint;
@@ -181,60 +180,16 @@ test "actors-single-threaded" {
     assert(player0.body.hits + player1.body.hits == player1.body.last_ball_hits);
 }
 
-const ThreadContext = struct {
-    const Self = @This();
-
-    idn: u8,
-    name_len: usize,
-    name: [32]u8,
-    done: u8,
-    dispatcher: ActorDispatcher(1),
-
-    pub fn init(pSelf: *Self, idn: u8, name: [] const u8) void {
-        // Set name_len and then copy with truncation
-        pSelf.idn = idn;
-        pSelf.name_len = math.min(name.len, pSelf.name.len);
-        mem.copy(u8, pSelf.name[0..pSelf.name_len], name[0..pSelf.name_len]);
-        warn("ThreadContext.init:+ name={}\n", pSelf.name);
-        defer warn("ThreadContext.init:- name={}\n", pSelf.name);
-
-        pSelf.dispatcher.init();
-    }
-
-    // TODO: How to support multiple ActorDispatchers?
-    fn threadDispatcherFn(pSelf: *ThreadContext) void {
-        warn("threadDispatcherFn:+ {}\n", pSelf.name);
-        defer warn("threadDispatcherFn:- {}\n", pSelf.name);
-
-        while (@atomicLoad(u8, &pSelf.done, AtomicOrder.SeqCst) == 0) {
-            if (pSelf.dispatcher.loop()) {
-                //warn("TD{}WAIT\n", pSelf.idn);
-                futex_wait(&pSelf.dispatcher.signal_context, 0);
-            }
-        }
-    }
-
-    // TODO: How to support multiple ActorDispatchers?
-    fn threadDoneFn(doneFn_handle: usize) void {
-        var pContext = @intToPtr(*ThreadContext, doneFn_handle);
-        //warn("TD{}DONE{}+\n", pContext.idn, @atomicLoad(u8, &pContext.done, AtomicOrder.SeqCst));
-        _ = @atomicRmw(u8, &pContext.done, AtomicRmwOp.Xchg, 1, AtomicOrder.SeqCst);
-        _ = @atomicRmw(SignalContext, &pContext.dispatcher.signal_context, AtomicRmwOp.Xchg, 1, AtomicOrder.SeqCst);
-        futex_wake(&pContext.dispatcher.signal_context, 1);
-        //warn("TD{}DONE{}-\n", pContext.idn, @atomicLoad(u8, &pContext.done, AtomicOrder.SeqCst));
-    }
-};
-
-var thread0_context: ThreadContext = undefined;
-var thread1_context: ThreadContext = undefined;
+var thread0_context: ActorThreadContext = undefined;
+var thread1_context: ActorThreadContext = undefined;
 
 test "actors-multi-threaded" {
     warn("\ncall thread_context init's\n");
     thread0_context.init(0, "thread0");
     thread1_context.init(1, "thread1");
 
-    var thread0 = try std.os.spawnThread(&thread0_context, ThreadContext.threadDispatcherFn);
-    var thread1 = try std.os.spawnThread(&thread1_context, ThreadContext.threadDispatcherFn);
+    var thread0 = try std.os.spawnThread(&thread0_context, ActorThreadContext.threadDispatcherFn);
+    var thread1 = try std.os.spawnThread(&thread1_context, ActorThreadContext.threadDispatcherFn);
     warn("threads Spawned\n");
 
     // Create a PlayerActor type
@@ -242,14 +197,14 @@ test "actors-multi-threaded" {
     const max_hits = 10;
 
     // Create player0
-    var player0 = PlayerActor.initFull(ThreadContext.threadDoneFn, @ptrToInt(&thread0_context));
+    var player0 = PlayerActor.initFull(ActorThreadContext.threadDoneFn, @ptrToInt(&thread0_context));
     player0.body.max_hits = max_hits;
     assert(player0.body.hits == 0);
     warn("add player0\n");
     try thread0_context.dispatcher.add(&player0.interface);
 
     // Create player1
-    var player1 = PlayerActor.initFull(ThreadContext.threadDoneFn, @ptrToInt(&thread1_context));
+    var player1 = PlayerActor.initFull(ActorThreadContext.threadDoneFn, @ptrToInt(&thread1_context));
     player1.body.max_hits = max_hits;
     assert(player1.body.hits == 0);
     warn("add player1\n");
