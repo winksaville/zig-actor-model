@@ -180,12 +180,13 @@ test "actors-single-threaded" {
     assert(player0.body.hits + player1.body.hits == player1.body.last_ball_hits);
 }
 
-var thread0_context: ActorThreadContext = undefined;
-var thread1_context: ActorThreadContext = undefined;
-
 test "actors-multi-threaded" {
     warn("\ncall thread_context init's\n");
+
+    var thread0_context: ActorThreadContext = undefined;
     thread0_context.init(0, "thread0");
+
+    var thread1_context: ActorThreadContext = undefined;
     thread1_context.init(1, "thread1");
 
     var thread0 = try std.os.spawnThread(&thread0_context, ActorThreadContext.threadDispatcherFn);
