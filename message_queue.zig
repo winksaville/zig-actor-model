@@ -123,6 +123,10 @@ const Context = struct {
     puts_done: u8, // TODO make this a bool
 };
 
+// **************************************
+// The code below is from zig/std/atomic/queue.zig
+// **************************************
+
 // TODO add lazy evaluated build options and then put puts_per_thread behind
 // some option such as: "AggressiveMultithreadedFuzzTest". In the AppVeyor
 // CI we would use a less aggressive setting since at 1 core, while we still
@@ -184,7 +188,7 @@ fn startPuts(ctx: *Context) u8 {
     var put_count: usize = puts_per_thread;
     var r = std.rand.DefaultPrng.init(0xdeadbeef);
     while (put_count != 0) : (put_count -= 1) {
-        std.os.time.sleep(0, 1); // let the os scheduler be our fuzz
+        std.os.time.sleep(1); // let the os scheduler be our fuzz
         const x = r.random.scalar(u64);
         const mh = ctx.allocator.create(MessageHeader {
             .pNext = null,
@@ -202,7 +206,7 @@ fn startPuts(ctx: *Context) u8 {
 fn startGetter(ctx: *Context) u8 {
     while (true) {
         while (ctx.queue.get()) |mh| {
-            std.os.time.sleep(0, 1); // let the os scheduler be our fuzz
+            std.os.time.sleep(1); // let the os scheduler be our fuzz
             _ = @atomicRmw(u64, &ctx.get_sum, builtin.AtomicRmwOp.Add, mh.cmd, builtin.AtomicOrder.SeqCst);
             _ = @atomicRmw(usize, &ctx.get_count, builtin.AtomicRmwOp.Add, 1, builtin.AtomicOrder.SeqCst);
         }
